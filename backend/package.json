@@ -1,0 +1,46 @@
+{
+  "name": "budget-ai-assistant-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "migrate": "node scripts/migrate.js",
+    "seed": "node scripts/seed.js",
+    "reindex": "node scripts/reindex-knowledge.js",
+    "enable-vector": "node scripts/enable-vector.js",
+    "check": "node --check src/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1020.0",
+    "@aws-sdk/s3-request-presigner": "^3.1021.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
+    "hpp": "^0.2.3",
+    "imapflow": "^1.2.18",
+    "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.12.0",
+    "multer": "^2.1.1",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^6.10.1",
+    "officeparser": "^6.0.7",
+    "openai": "^6.33.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.13.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7",
+    "vitest": "^4.1.2"
+  }
+}

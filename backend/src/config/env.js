@@ -21,7 +21,7 @@ export const env = {
   openAiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
   openAiChatModel: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
   embeddingDimensions: Number(process.env.EMBEDDING_DIMENSIONS || 1536),
-  corsOrigins: (process.env.CORS_ORIGIN || "http://127.0.0.1:5173,http://localhost:5173")
+  corsOrigins: (process.env.CORS_ORIGIN || "http://127.0.0.1:5173,http://localhost:5173,http://50.16.113.181,https://budget-ai-assistant.vercel.app")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean),

@@ -12,7 +12,6 @@ export const signupSchema = z.object({
     name: z.string().min(2, "Name is required"),
     email: z.string().email("Valid email is required"),
     password: strongPassword,
-    role: z.enum(["Admin", "Budget Analyst", "Department Editor", "Read Only"]),
     departmentCode: z.string().min(2, "Department code is required")
   }),
   params: z.object({}),

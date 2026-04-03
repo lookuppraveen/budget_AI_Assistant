@@ -9,10 +9,10 @@
 };
 
 export const navItems = [
+  { id: "chat", label: "AI Assistant", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
   { id: "dashboard", label: "Dashboard", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
   { id: "reports", label: "Reports", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
   { id: "manualreports", label: "Manual Reports", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
-  { id: "chat", label: "Chat Q&A", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
   { id: "email", label: "Email Assistant", roles: ["Admin", "Budget Analyst", "Department Editor"] },
   { id: "knowledge", label: "Knowledge Domains", roles: ["Admin", "Budget Analyst", "Department Editor"] },
   { id: "audit", label: "Citations & Audit", roles: ["Admin", "Budget Analyst"] },

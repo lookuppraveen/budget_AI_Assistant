@@ -175,7 +175,7 @@ export default function ChatPanel({
       {/* ── Top header ─────────────────────────────────────────────── */}
       <div className="cp-header">
         <div className="cp-header-left">
-          <h2>Budget Chat Q&amp;A</h2>
+          <h2>AI Assistant</h2>
           <p>Ask policy, historical, and departmental budget questions with source-grounded responses.</p>
         </div>
         <div className="cp-header-right">

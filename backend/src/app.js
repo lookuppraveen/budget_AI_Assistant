@@ -23,6 +23,7 @@ import { emailRouter } from "./modules/email/email.routes.js";
 import { sharepointRouter } from "./modules/sharepoint/sharepoint.routes.js";
 import { auditRouter } from "./modules/audit/audit.routes.js";
 import { manualReportsRouter } from "./modules/manual-reports/manual-reports.routes.js";
+import { ttsRouter } from "./modules/tts/tts.routes.js";
 import { notFoundHandler } from "./middleware/not-found.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
@@ -70,6 +71,7 @@ app.use("/api/v1/email", emailRouter);
 app.use("/api/v1/sharepoint", sharepointRouter);
 app.use("/api/v1/audit", auditRouter);
 app.use("/api/v1/manual-reports", manualReportsRouter);
+app.use("/api/v1/tts", ttsRouter);
 
 app.use("/api/v1/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get("/api/v1/docs.json", (_req, res) => res.json(swaggerSpec));

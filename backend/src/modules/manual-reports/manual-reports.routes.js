@@ -27,7 +27,7 @@ const generateSchema = z.object({
     dateFrom: z.string().optional(),
     dateTo: z.string().optional(),
     additionalNotes: z.string().max(1000).optional(),
-    format: z.enum(["txt", "docx"]).default("txt")
+    format: z.enum(["txt", "docx", "pdf"]).default("txt")
   })
 });
 
@@ -69,13 +69,22 @@ manualReportsRouter.get(
       return res.status(400).json({ message: "Report is not ready for download." });
     }
 
-    const ext = report.format === "docx" ? "docx" : "txt";
+    const extMap = { docx: "docx", pdf: "pdf", txt: "txt" };
+    const ext = extMap[report.format] || "txt";
     const safeName = report.title.replace(/[^a-z0-9_\-\s]/gi, "_").trim();
     const filename = `${safeName}.${ext}`;
 
     if (report.format === "docx") {
       const buffer = Buffer.from(report.content, "base64");
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", buffer.length);
+      return res.send(buffer);
+    }
+
+    if (report.format === "pdf") {
+      const buffer = Buffer.from(report.content, "base64");
+      res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Length", buffer.length);
       return res.send(buffer);

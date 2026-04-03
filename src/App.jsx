@@ -22,41 +22,11 @@ const RESET_TOKEN = new URLSearchParams(window.location.search).get("token");
 
 // ── TTS voice quality helpers ─────────────────────────────────────────────────
 
-// Natural voices ranked — Microsoft Neural (Edge) > Google (Chrome) > system
-const PREFERRED_VOICE_NAMES = [
-  "Microsoft Aria Online (Natural) - English (United States)",
-  "Microsoft Jenny Online (Natural) - English (United States)",
-  "Microsoft Guy Online (Natural) - English (United States)",
-  "Microsoft Ana Online (Natural) - English (United States)",
-  "Microsoft Emma Online (Natural) - English (United States)",
-  "Microsoft Brian Online (Natural) - English (United States)",
-  "Google US English",
-  "Microsoft Aria - English (United States)",
-  "Microsoft Zira - English (United States)",
-  "Samantha",   // macOS
-  "Karen",      // macOS AU
-  "Daniel",     // macOS UK
-];
-
-function pickBestVoice(voices) {
-  for (const name of PREFERRED_VOICE_NAMES) {
-    const match = voices.find((v) => v.name === name);
-    if (match) return match;
-  }
-  return (
-    voices.find((v) => v.lang === "en-US") ||
-    voices.find((v) => v.lang?.startsWith("en")) ||
-    null
-  );
-}
-
-// Deep text cleanup — converts markdown + symbols to natural spoken language
+// Strip markdown/symbols so OpenAI TTS reads naturally
 function cleanTextForSpeech(raw) {
   return raw
-    // Remove code blocks entirely
-    .replace(/```[\s\S]*?```/g, "See the text response for the code details.")
+    .replace(/```[\s\S]*?```/g, "See the text response for code details.")
     .replace(/`([^`\n]+)`/g, "$1")
-    // Remove markdown headings, bold, italic, links
     .replace(/^#{1,6}\s+/gm, "")
     .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, "$1")
     .replace(/_{1,2}([^_\n]+)_{1,2}/g, "$1")
@@ -64,56 +34,23 @@ function cleanTextForSpeech(raw) {
     .replace(/https?:\/\/\S+/g, "")
     .replace(/\[\d+\]/g, "")
     .replace(/\[Source:[^\]]*\]/gi, "")
-    // Convert bullet/numbered lists to sentences with natural flow
-    .replace(/^\s*\d+\.\s+/gm, "Next, ")
-    .replace(/^[\s]*[-•*]\s+/gm, "Also, ")
-    // Expand common abbreviations to full spoken words
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/^[\s]*[-•*]\s+/gm, "")
     .replace(/\be\.g\./gi, "for example,")
     .replace(/\bi\.e\./gi, "that is,")
     .replace(/\betc\./gi, "and so on")
     .replace(/\bvs\./gi, "versus")
-    .replace(/\bapprox\./gi, "approximately")
-    .replace(/\bDept\./gi, "Department")
     .replace(/\bFY(\d{2,4})/g, "Fiscal Year $1")
     .replace(/\bQ([1-4])\b/g, "Quarter $1")
-    // Convert symbols to spoken equivalents
     .replace(/(\d[\d,]*)\s*%/g, "$1 percent")
     .replace(/\$\s*([\d,]+(\.\d+)?)/g, (_, n) => n + " dollars")
     .replace(/\s*&\s*/g, " and ")
     .replace(/#(\w)/g, "number $1")
     .replace(/\//g, " or ")
-    // Add natural pauses around key transition words
-    .replace(/\b(However|Moreover|Furthermore|Therefore|Additionally|In addition|That said|In summary|To summarize|Overall|Finally|First|Second|Third)\b/g, "... $1,")
-    // Flatten newlines into sentence boundaries
     .replace(/\n{2,}/g, ". ")
-    .replace(/\n/g, ", ")
-    // Clean up punctuation artifacts
-    .replace(/,\s*\./g, ".")
-    .replace(/\.\s*,/g, ".")
-    .replace(/\.{2,}/g, ".")
+    .replace(/\n/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
-}
-
-// Split cleaned text into sentences for multi-utterance natural delivery
-function splitIntoSentences(text) {
-  // Split on sentence-ending punctuation followed by space or end
-  const raw = text.match(/[^.!?…]+[.!?…]+[\s]*/g) || [text];
-  return raw
-    .map((s) => s.trim())
-    .filter((s) => s.length > 2);
-}
-
-// Tiny seeded-random variation so consecutive sentences differ slightly
-// but the same sentence always sounds roughly similar (not wildly random)
-function sentenceVariation(sentence, index) {
-  const len = sentence.length;
-  // Rate: 0.86–0.96 depending on sentence length (shorter = slightly faster)
-  const rate = len < 40 ? 0.94 : len < 80 ? 0.90 : 0.86;
-  // Pitch: gentle sine-wave variation across sentences gives natural cadence
-  const pitchOffset = Math.sin(index * 1.3) * 0.05;
-  const pitch = 1.06 + pitchOffset;
-  return { rate, pitch };
 }
 
 function hasPanelAccess(role, panelId) {
@@ -205,7 +142,8 @@ export default function App() {
   const isSpeakingRef = useRef(isSpeaking);
   const isListeningRef = useRef(isListening);
   const sttSupportedRef = useRef(sttSupported);
-  const bestVoiceRef = useRef(null);
+  // Tracks the currently playing OpenAI TTS audio so it can be stopped
+  const currentAudioRef = useRef(null);
 
   const clearSession = () => {
     setSessionUser(null);
@@ -404,26 +342,14 @@ export default function App() {
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const hasSpeechSynthesis = "speechSynthesis" in window;
 
     if (!SpeechRecognition) {
       setVoiceStatus("Voice input is not supported in this browser.");
     }
 
     setSttSupported(Boolean(SpeechRecognition));
-    setTtsSupported(hasSpeechSynthesis);
-
-    // Load the best available TTS voice (voices load asynchronously in most browsers)
-    if (hasSpeechSynthesis) {
-      const loadVoices = () => {
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
-          bestVoiceRef.current = pickBestVoice(voices);
-        }
-      };
-      loadVoices();
-      window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
-    }
+    // TTS is always "supported" — we use OpenAI API, not browser synthesis
+    setTtsSupported(true);
 
     if (!SpeechRecognition) {
       return;
@@ -511,12 +437,10 @@ export default function App() {
         recognitionRef.current.onend = null;
         recognitionRef.current.stop();
       }
-
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-        // loadVoices is defined in the outer scope of this effect; removing
-        // the generic listener is safe because we only added one per mount.
-        window.speechSynthesis.onvoiceschanged = null;
+      // Stop any playing OpenAI TTS audio on unmount
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
       }
     };
   }, []);
@@ -535,82 +459,71 @@ export default function App() {
     setVoiceStatus("Voice listening paused.");
   };
 
-  const speakAssistantReply = (text) => {
-    if (!ttsSupported || !aiVoiceEnabledRef.current) return;
+  const speakAssistantReply = async (text) => {
+    if (!aiVoiceEnabledRef.current) return;
 
     const spokenText = cleanTextForSpeech(text);
-    if (!spokenText) return;
+    if (!spokenText || !sessionTokenRef.current) return;
 
-    // Cancel any speech already in progress
-    window.speechSynthesis.cancel();
+    // Stop any audio already playing
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
 
-    const sentences = splitIntoSentences(spokenText);
-    if (sentences.length === 0) return;
+    setIsSpeaking(true);
+    setVoiceStatus("Assistant is speaking...");
+    queueVoiceLog({ eventType: "tts_start", direction: "assistant", status: "speaking" });
 
-    let sentenceIndex = 0;
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api/v1";
+      const response = await fetch(`${apiBase}/tts/speak`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionTokenRef.current}`
+        },
+        body: JSON.stringify({ text: spokenText, voice: "nova" })
+      });
 
-    const speakNext = () => {
-      // Stop if voice was muted mid-response
-      if (!aiVoiceEnabledRef.current) {
-        setIsSpeaking(false);
-        return;
+      if (!response.ok) {
+        throw new Error("TTS request failed");
       }
 
-      if (sentenceIndex >= sentences.length) {
-        // All sentences done
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudioRef.current = audio;
+
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        currentAudioRef.current = null;
         setIsSpeaking(false);
         setVoiceStatus(
           twoWayModeRef.current
             ? "Two-way mode active. Listening again..."
             : "Assistant response delivered."
         );
-        if (shouldAutoListenRef.current) {
-          window.setTimeout(safeStartListening, 450);
-        }
         queueVoiceLog({ eventType: "tts_end", direction: "assistant", status: "completed" });
-        return;
-      }
-
-      const sentence = sentences[sentenceIndex];
-      const { rate, pitch } = sentenceVariation(sentence, sentenceIndex);
-      sentenceIndex += 1;
-
-      const utt = new SpeechSynthesisUtterance(sentence);
-      utt.volume = 1;
-      utt.rate = rate;
-      utt.pitch = pitch;
-
-      if (bestVoiceRef.current) {
-        utt.voice = bestVoiceRef.current;
-      }
-
-      // First sentence triggers "speaking" state
-      if (sentenceIndex === 1) {
-        utt.onstart = () => {
-          setIsSpeaking(true);
-          setVoiceStatus("Assistant is speaking...");
-          queueVoiceLog({ eventType: "tts_start", direction: "assistant", status: "speaking" });
-        };
-      }
-
-      utt.onend = () => {
-        // Small human-like gap between sentences (60–120ms)
-        const pause = 60 + Math.random() * 60;
-        window.setTimeout(speakNext, pause);
+        if (shouldAutoListenRef.current) {
+          window.setTimeout(safeStartListening, 400);
+        }
       };
 
-      utt.onerror = (e) => {
-        // Interrupted errors are normal when cancel() is called — ignore them
-        if (e.error === "interrupted" || e.error === "canceled") return;
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        currentAudioRef.current = null;
         setIsSpeaking(false);
         setVoiceStatus("Voice playback failed. Text response is still available.");
         queueVoiceLog({ eventType: "tts_error", direction: "assistant", status: "failed" });
       };
 
-      window.speechSynthesis.speak(utt);
-    };
-
-    speakNext();
+      await audio.play();
+    } catch (_err) {
+      setIsSpeaking(false);
+      setVoiceStatus("Voice playback failed. Text response is still available.");
+      queueVoiceLog({ eventType: "tts_error", direction: "assistant", status: "failed" });
+    }
   };
 
   const sendUserMessage = async (rawMessage, source = "text") => {
@@ -702,8 +615,11 @@ export default function App() {
     setAiVoiceEnabled(nextValue);
     aiVoiceEnabledRef.current = nextValue;
 
-    if (!nextValue && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+    if (!nextValue) {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
       setIsSpeaking(false);
       setVoiceStatus("AI voice muted. Text responses continue.");
       return;
@@ -712,25 +628,20 @@ export default function App() {
     setVoiceStatus("AI voice enabled.");
   };
 
-  const handleLogin = async ({ email, password, role }) => {
+  const handleLogin = async ({ email, password }) => {
     try {
       const result = await loginApi({ email, password });
-
-      if (result.user.role !== role) {
-        return { ok: false, message: `Role mismatch. Account role is ${result.user.role}.` };
-      }
-
       setSessionUser({ ...result.user, token: result.token });
-      setActivePanel("dashboard");
+      setActivePanel("chat");
       return { ok: true };
     } catch (error) {
       return { ok: false, message: error.message || "Unable to login." };
     }
   };
 
-  const handleSignup = async ({ name, email, password, role, departmentCode }) => {
+  const handleSignup = async ({ name, email, password, departmentCode }) => {
     try {
-      await signupApi({ name, email, password, role, departmentCode });
+      await signupApi({ name, email, password, departmentCode });
       return { ok: true };
     } catch (error) {
       return { ok: false, message: error.message || "Unable to create account." };
@@ -831,7 +742,7 @@ export default function App() {
                     setMessages(initialMessages);
                     setConversationId(null);
                     setDraft("");
-                    if (window.speechSynthesis) window.speechSynthesis.cancel();
+                    if (currentAudioRef.current) { currentAudioRef.current.pause(); currentAudioRef.current = null; } setIsSpeaking(false);
                   }}
                   onLoadConversation={(convId, msgs) => {
                     setConversationId(convId);

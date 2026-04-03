@@ -23,7 +23,7 @@ function signToken(payload) {
   });
 }
 
-export async function signupUser({ name, email, password, role, departmentCode }) {
+export async function signupUser({ name, email, password, departmentCode }) {
   const client = await pool.connect();
 
   try {
@@ -36,10 +36,11 @@ export async function signupUser({ name, email, password, role, departmentCode }
       throw error;
     }
 
-    const roleResult = await client.query("SELECT id, name FROM roles WHERE name = $1", [role]);
+    // New registrations always start with Read Only — admin can promote later
+    const roleResult = await client.query("SELECT id, name FROM roles WHERE name = $1", ["Read Only"]);
     if (roleResult.rowCount === 0) {
-      const error = new Error("Invalid role");
-      error.statusCode = 400;
+      const error = new Error("Default role 'Read Only' not found. Contact an administrator.");
+      error.statusCode = 500;
       throw error;
     }
 

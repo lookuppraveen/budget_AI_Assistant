@@ -39,7 +39,7 @@ export async function downloadManualReport(token, reportId, title, format) {
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const ext = format === "docx" ? "docx" : "txt";
+  const ext = format === "docx" ? "docx" : format === "pdf" ? "pdf" : "txt";
   const safeName = (title || "report").replace(/[^a-z0-9_\-\s]/gi, "_").trim();
   a.href = url;
   a.download = `${safeName}.${ext}`;

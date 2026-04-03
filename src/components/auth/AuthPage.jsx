@@ -1,6 +1,5 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 
-const roleOptions = ["Admin", "Budget Analyst", "Department Editor", "Read Only"];
 const departmentOptions = [
   { name: "Budget Office", code: "BUD" },
   { name: "Finance", code: "FIN" },
@@ -8,22 +7,49 @@ const departmentOptions = [
   { name: "Student Services", code: "STD" }
 ];
 
+const BENEFITS = [
+  {
+    icon: "🤖",
+    title: "AI-Powered Budget Insights",
+    desc: "Ask budget questions in plain English and get instant, policy-grounded answers from your documents and historical data."
+  },
+  {
+    icon: "🔐",
+    title: "Secure Role-Based Access",
+    desc: "Every team member sees only what they need. Admins, analysts, editors, and viewers each get a tailored workspace."
+  },
+  {
+    icon: "📊",
+    title: "Intelligent Report Generation",
+    desc: "Generate professional budget reports and summaries in Word or PDF format with AI-assisted content and formatting."
+  },
+  {
+    icon: "🎙️",
+    title: "Voice-Enabled Conversations",
+    desc: "Use natural voice input to ask questions and hear responses — hands-free budget assistance, anytime."
+  },
+  {
+    icon: "📋",
+    title: "Audit-Ready Governance",
+    desc: "Every AI interaction is logged with source citations, providing a complete, defensible audit trail."
+  }
+];
+
 export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetToken }) {
   const [mode, setMode] = useState(resetToken ? "reset" : "login");
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("error"); // "error" | "success"
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [loginForm, setLoginForm] = useState({
     email: "admin@stlcc.edu",
-    password: "Admin@12345",
-    role: "Admin"
+    password: "Admin@12345"
   });
 
   const [signupForm, setSignupForm] = useState({
     name: "",
     email: "",
     password: "",
-    role: "Budget Analyst",
     departmentCode: "BUD"
   });
 
@@ -31,17 +57,20 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
+  const showMsg = (msg, type = "error") => {
+    setMessage(msg);
+    setMessageType(type);
+  };
+
   const submitLogin = async (event) => {
     event.preventDefault();
     setIsSubmitting(true);
-
     try {
       const result = await onLogin(loginForm);
       if (!result.ok) {
-        setMessage(result.message);
+        showMsg(result.message);
         return;
       }
-
       setMessage("");
     } finally {
       setIsSubmitting(false);
@@ -51,30 +80,16 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
   const submitSignup = async (event) => {
     event.preventDefault();
     setIsSubmitting(true);
-
     try {
       const result = await onSignup(signupForm);
-
       if (!result.ok) {
-        setMessage(result.message);
+        showMsg(result.message);
         return;
       }
-
-      setMessage("Signup successful. You can now log in with the new account.");
+      showMsg("Account created. You can now log in.", "success");
       setMode("login");
-      setLoginForm((previous) => ({
-        ...previous,
-        email: signupForm.email,
-        role: signupForm.role,
-        password: signupForm.password
-      }));
-      setSignupForm({
-        name: "",
-        email: "",
-        password: "",
-        role: "Budget Analyst",
-        departmentCode: "BUD"
-      });
+      setLoginForm((prev) => ({ ...prev, email: signupForm.email, password: signupForm.password }));
+      setSignupForm({ name: "", email: "", password: "", departmentCode: "BUD" });
     } finally {
       setIsSubmitting(false);
     }
@@ -82,16 +97,14 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
 
   const submitForgot = async (event) => {
     event.preventDefault();
-
     if (!forgotEmail.trim()) {
-      setMessage("Enter your email to receive reset instructions.");
+      showMsg("Enter your email to receive reset instructions.");
       return;
     }
-
     setIsSubmitting(true);
     try {
       const result = await onForgot({ email: forgotEmail.trim() });
-      setMessage(result.message || `Reset instructions sent to ${forgotEmail}.`);
+      showMsg(result.message || `Reset instructions sent to ${forgotEmail}.`, "success");
     } finally {
       setIsSubmitting(false);
     }
@@ -99,20 +112,18 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
 
   const submitReset = async (event) => {
     event.preventDefault();
-
     if (newPassword !== confirmPassword) {
-      setMessage("Passwords do not match.");
+      showMsg("Passwords do not match.");
       return;
     }
-
     setIsSubmitting(true);
     try {
       const result = await onReset({ token: resetToken, password: newPassword });
       if (!result.ok) {
-        setMessage(result.message);
+        showMsg(result.message);
         return;
       }
-      setMessage("Password reset successfully. You can now log in.");
+      showMsg("Password reset successfully. You can now log in.", "success");
       setNewPassword("");
       setConfirmPassword("");
       setMode("login");
@@ -123,49 +134,86 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
 
   return (
     <main className="auth-shell">
+      {/* ── Left panel ── */}
       <section className="auth-left">
-        <p className="eyebrow">STLCC Budget Office</p>
-        <h1>Budget Assistant Platform</h1>
-        <p>
-          Secure role-based access for admins, budget analysts, and departmental users with guided setup and
-          governance controls.
-        </p>
-        <div className="auth-features">
-          <span>Role-based dashboards</span>
-          <span>Policy-grounded AI responses</span>
-          <span>Audit-ready governance</span>
+        <div className="auth-brand">
+          <div className="auth-brand-icon">💼</div>
+          <div>
+            <p className="auth-brand-org">STLCC Budget Office</p>
+            <h1 className="auth-brand-title">Budget AI Assistant</h1>
+          </div>
         </div>
+
+        <p className="auth-tagline">
+          Your intelligent platform for budget management, policy guidance, and governance — all in one place.
+        </p>
+
+        <div className="auth-benefits">
+          {BENEFITS.map((b) => (
+            <div key={b.title} className="auth-benefit-card">
+              <span className="auth-benefit-icon">{b.icon}</span>
+              <div>
+                <p className="auth-benefit-title">{b.title}</p>
+                <p className="auth-benefit-desc">{b.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <p className="auth-footer-note">
+          Powered by OpenAI &nbsp;·&nbsp; Built for STLCC
+        </p>
       </section>
 
+      {/* ── Right panel (auth card) ── */}
       <section className="auth-card">
-        <div className="auth-tabs" role="tablist" aria-label="Auth modes">
-          <button type="button" className={`tab-btn ${mode === "login" ? "active" : ""}`} onClick={() => setMode("login")}>
-            Login
-          </button>
-          <button type="button" className={`tab-btn ${mode === "signup" ? "active" : ""}`} onClick={() => setMode("signup")}>
-            Sign Up
-          </button>
-          <button type="button" className={`tab-btn ${mode === "forgot" ? "active" : ""}`} onClick={() => setMode("forgot")}>
-            Forgot Password
-          </button>
-          {resetToken && (
-            <button type="button" className={`tab-btn ${mode === "reset" ? "active" : ""}`} onClick={() => setMode("reset")}>
-              Reset Password
-            </button>
-          )}
+        <div className="auth-card-header">
+          <h2 className="auth-card-title">
+            {mode === "login" && "Welcome back"}
+            {mode === "signup" && "Create an account"}
+            {mode === "forgot" && "Reset your password"}
+            {mode === "reset" && "Set new password"}
+          </h2>
+          <p className="auth-card-sub">
+            {mode === "login" && "Sign in to access your dashboard"}
+            {mode === "signup" && "Get started — access is granted by an admin"}
+            {mode === "forgot" && "We'll send you a reset link"}
+            {mode === "reset" && "Choose a strong new password"}
+          </p>
         </div>
 
-        {message && <p className="auth-message">{message}</p>}
+        {!resetToken && (
+          <div className="auth-tabs" role="tablist">
+            <button type="button" className={`tab-btn ${mode === "login" ? "active" : ""}`} onClick={() => { setMode("login"); setMessage(""); }}>
+              Sign In
+            </button>
+            <button type="button" className={`tab-btn ${mode === "signup" ? "active" : ""}`} onClick={() => { setMode("signup"); setMessage(""); }}>
+              Register
+            </button>
+            <button type="button" className={`tab-btn ${mode === "forgot" ? "active" : ""}`} onClick={() => { setMode("forgot"); setMessage(""); }}>
+              Forgot Password
+            </button>
+          </div>
+        )}
 
+        {message && (
+          <p className={`auth-message ${messageType === "success" ? "auth-message--success" : ""}`}>
+            {message}
+          </p>
+        )}
+
+        {/* ── Login ── */}
         {mode === "login" && (
           <form className="auth-form" onSubmit={submitLogin}>
             <label className="field">
-              <span>Email</span>
+              <span>Email address</span>
               <input
                 type="email"
                 value={loginForm.email}
-                onChange={(event) => setLoginForm((previous) => ({ ...previous, email: event.target.value }))}
+                onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
+                placeholder="you@stlcc.edu"
                 required
+                autoComplete="email"
               />
             </label>
             <label className="field">
@@ -173,47 +221,41 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
               <input
                 type="password"
                 value={loginForm.password}
-                onChange={(event) => setLoginForm((previous) => ({ ...previous, password: event.target.value }))}
+                onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+                placeholder="Your password"
                 required
+                autoComplete="current-password"
               />
             </label>
-            <label className="field">
-              <span>Role</span>
-              <select
-                value={loginForm.role}
-                onChange={(event) => setLoginForm((previous) => ({ ...previous, role: event.target.value }))}
-              >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-            </label>
             <button type="submit" className="action-btn auth-submit" disabled={isSubmitting}>
-              {isSubmitting ? "Signing in..." : "Access Platform"}
+              {isSubmitting ? "Signing in…" : "Sign In"}
             </button>
           </form>
         )}
 
+        {/* ── Signup ── */}
         {mode === "signup" && (
           <form className="auth-form" onSubmit={submitSignup}>
             <label className="field">
-              <span>Full Name</span>
+              <span>Full name</span>
               <input
                 type="text"
                 value={signupForm.name}
-                onChange={(event) => setSignupForm((previous) => ({ ...previous, name: event.target.value }))}
+                onChange={(e) => setSignupForm((p) => ({ ...p, name: e.target.value }))}
+                placeholder="Jane Smith"
                 required
+                autoComplete="name"
               />
             </label>
             <label className="field">
-              <span>Email</span>
+              <span>Email address</span>
               <input
                 type="email"
                 value={signupForm.email}
-                onChange={(event) => setSignupForm((previous) => ({ ...previous, email: event.target.value }))}
+                onChange={(e) => setSignupForm((p) => ({ ...p, email: e.target.value }))}
+                placeholder="you@stlcc.edu"
                 required
+                autoComplete="email"
               />
             </label>
             <label className="field">
@@ -221,89 +263,87 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
               <input
                 type="password"
                 value={signupForm.password}
-                onChange={(event) => setSignupForm((previous) => ({ ...previous, password: event.target.value }))}
+                onChange={(e) => setSignupForm((p) => ({ ...p, password: e.target.value }))}
+                placeholder="Min 8 chars, uppercase, number"
                 required
+                autoComplete="new-password"
               />
             </label>
             <label className="field">
               <span>Department</span>
               <select
                 value={signupForm.departmentCode}
-                onChange={(event) =>
-                  setSignupForm((previous) => ({ ...previous, departmentCode: event.target.value }))
-                }
+                onChange={(e) => setSignupForm((p) => ({ ...p, departmentCode: e.target.value }))}
               >
-                {departmentOptions.map((department) => (
-                  <option key={department.code} value={department.code}>
-                    {department.name} ({department.code})
+                {departmentOptions.map((d) => (
+                  <option key={d.code} value={d.code}>
+                    {d.name} ({d.code})
                   </option>
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Role</span>
-              <select
-                value={signupForm.role}
-                onChange={(event) => setSignupForm((previous) => ({ ...previous, role: event.target.value }))}
-              >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-            </label>
+
+            <div className="auth-role-notice">
+              <span className="auth-role-notice-icon">ℹ️</span>
+              <span>New accounts start with <strong>Read Only</strong> access. An admin can update your permissions after registration.</span>
+            </div>
+
             <button type="submit" className="action-btn auth-submit" disabled={isSubmitting}>
-              {isSubmitting ? "Creating..." : "Create Account"}
+              {isSubmitting ? "Creating account…" : "Create Account"}
             </button>
           </form>
         )}
 
+        {/* ── Forgot password ── */}
         {mode === "forgot" && (
           <form className="auth-form" onSubmit={submitForgot}>
             <label className="field">
-              <span>Registered Email</span>
+              <span>Registered email</span>
               <input
                 type="email"
                 value={forgotEmail}
-                onChange={(event) => setForgotEmail(event.target.value)}
+                onChange={(e) => setForgotEmail(e.target.value)}
                 placeholder="you@stlcc.edu"
                 required
+                autoComplete="email"
               />
             </label>
             <button type="submit" className="action-btn auth-submit" disabled={isSubmitting}>
-              {isSubmitting ? "Sending..." : "Send Reset Link"}
+              {isSubmitting ? "Sending…" : "Send Reset Link"}
             </button>
           </form>
         )}
 
+        {/* ── Reset password ── */}
         {mode === "reset" && (
           <form className="auth-form" onSubmit={submitReset}>
-            <p style={{ fontSize: "0.85rem", opacity: 0.7, marginBottom: "0.5rem" }}>
-              Enter your new password below. Must be at least 8 characters with uppercase, lowercase, and a number.
+            <p className="auth-reset-hint">
+              Enter your new password below. Must be at least 8 characters with an uppercase letter and a number.
             </p>
             <label className="field">
-              <span>New Password</span>
+              <span>New password</span>
               <input
                 type="password"
                 value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
+                onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="New password"
                 required
+                autoComplete="new-password"
               />
             </label>
             <label className="field">
-              <span>Confirm Password</span>
+              <span>Confirm password</span>
               <input
                 type="password"
                 value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm new password"
                 required
+                autoComplete="new-password"
               />
             </label>
             <button type="submit" className="action-btn auth-submit" disabled={isSubmitting}>
-              {isSubmitting ? "Resetting..." : "Set New Password"}
+              {isSubmitting ? "Resetting…" : "Set New Password"}
             </button>
           </form>
         )}

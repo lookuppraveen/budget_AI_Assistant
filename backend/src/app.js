@@ -29,12 +29,21 @@ import { errorHandler } from "./middleware/error-handler.js";
 
 const app = express();
 
-const corsOrigins = ["http://localhost:4000", "http://localhost:5173", "https://budget-ai-assistant.vercel.app", "https://budget-ai-assistant.vercel.app/,https://budgetaiassistance.myaisquad.com/, https://budgetaiassistance.myaisquad.com"]
 app.use(helmet());
 app.use(hpp());
 app.use(
   cors({
-    origin: "*",
+    origin: (origin, callback) => {
+      // Allow server-to-server calls (no origin) and listed origins
+      if (!origin || env.corsOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin '${origin}' not allowed`));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
   })
 );
 app.use(express.json({ limit: "10mb" }));

@@ -3,6 +3,11 @@ dist/
 .vite/
 
 # Environment files — never commit real secrets
+.env
 .env.local
 .env.*.local
+backend/.env
 backend/.env.local
+
+# Tesseract trained data (large binary)
+backend/eng.traineddata

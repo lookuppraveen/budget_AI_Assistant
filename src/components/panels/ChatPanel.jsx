@@ -97,12 +97,14 @@ export default function ChatPanel({
   onSubmit,
   onStartListening,
   onStopListening,
+  onStop,
   onToggleAiVoice,
   onToggleTwoWayMode,
   onClearChat,
   onLoadConversation,
   isListening,
   isSpeaking,
+  isSending,
   aiVoiceEnabled,
   twoWayMode,
   voiceStatus,
@@ -227,6 +229,37 @@ export default function ChatPanel({
           </div>
         ))}
         <div ref={chatEndRef} />
+      </div>
+
+      {/* ── Stop / Clear action bar ────────────────────────────────── */}
+      <div className="cp-action-bar">
+        <button
+          type="button"
+          className="cp-action-btn cp-stop-btn"
+          onClick={onStop}
+          disabled={!isSending && !isSpeaking && !isListening}
+          title="Stop current response or voice activity"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true">
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+          </svg>
+          Stop
+        </button>
+        <button
+          type="button"
+          className="cp-action-btn cp-clear-btn"
+          onClick={onClearChat}
+          disabled={messages.length <= 1}
+          title="Clear chat and start fresh"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round" width="14" height="14" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14H6L5 6" />
+            <path d="M10 11v6M14 11v6" />
+          </svg>
+          Clear
+        </button>
       </div>
 
       {/* ── Input + voice bar ──────────────────────────────────────── */}

@@ -132,6 +132,8 @@ export default function App() {
   const [twoWayMode, setTwoWayMode] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("Voice assistant ready.");
 
+  const [isSending, setIsSending] = useState(false);
+
   const recognitionRef = useRef(null);
   const shouldAutoListenRef = useRef(false);
   const sendUserMessageRef = useRef(null);
@@ -144,6 +146,8 @@ export default function App() {
   const sttSupportedRef = useRef(sttSupported);
   // Tracks the currently playing OpenAI TTS audio so it can be stopped
   const currentAudioRef = useRef(null);
+  // Tracks in-flight chat request so it can be aborted
+  const chatAbortControllerRef = useRef(null);
 
   const clearSession = () => {
     setSessionUser(null);
@@ -539,12 +543,17 @@ export default function App() {
     setMessages((previous) => [...previous, { role: "user", text: message, source }]);
     setDraft("");
 
+    const abortController = new AbortController();
+    chatAbortControllerRef.current = abortController;
+    setIsSending(true);
+
     try {
       const result = await sendChatMessage({
         token: sessionUser.token,
         conversationId: conversationIdRef.current || undefined,
         message,
-        source
+        source,
+        signal: abortController.signal
       });
 
       if (result.conversation?.id) {
@@ -563,6 +572,9 @@ export default function App() {
       setMessages((previous) => [...previous, assistantReply]);
       speakAssistantReply(assistantReply.text);
     } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
       if (error?.statusCode === 401) {
         return;
       }
@@ -573,6 +585,9 @@ export default function App() {
         text: `I could not reach the chat service: ${error.message || "unknown error"}.`
       };
       setMessages((previous) => [...previous, fallbackReply]);
+    } finally {
+      chatAbortControllerRef.current = null;
+      setIsSending(false);
     }
   };
 
@@ -581,6 +596,28 @@ export default function App() {
   const handleSubmit = async (event) => {
     event.preventDefault();
     await sendUserMessage(draft, "text");
+  };
+
+  const stopAll = () => {
+    // Abort in-flight chat request
+    if (chatAbortControllerRef.current) {
+      chatAbortControllerRef.current.abort();
+      chatAbortControllerRef.current = null;
+    }
+    setIsSending(false);
+    // Stop TTS audio
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    setIsSpeaking(false);
+    // Stop STT
+    if (isListeningRef.current) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    }
+    shouldAutoListenRef.current = false;
+    setVoiceStatus("Stopped.");
   };
 
   const startListening = () => {
@@ -726,6 +763,7 @@ export default function App() {
                   currentConversationId={conversationId}
                   isListening={isListening}
                   isSpeaking={isSpeaking}
+                  isSending={isSending}
                   aiVoiceEnabled={aiVoiceEnabled}
                   twoWayMode={twoWayMode}
                   voiceStatus={voiceStatus}
@@ -736,6 +774,7 @@ export default function App() {
                   onSubmit={handleSubmit}
                   onStartListening={startListening}
                   onStopListening={stopListening}
+                  onStop={stopAll}
                   onToggleAiVoice={toggleAiVoice}
                   onToggleTwoWayMode={toggleTwoWayMode}
                   onClearChat={() => {

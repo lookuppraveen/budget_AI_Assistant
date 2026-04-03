@@ -2,9 +2,9 @@ import OpenAI from "openai";
 import { pool } from "../../config/db.js";
 import { env } from "../../config/env.js";
 
-const LOCAL_EMBEDDING_DIMENSIONS = 128;
-const CHUNK_SIZE_WORDS = 90;
-const CHUNK_OVERLAP_WORDS = 18;
+const LOCAL_EMBEDDING_DIMENSIONS = 256;
+const CHUNK_SIZE_WORDS = 200;
+const CHUNK_OVERLAP_WORDS = 50;
 
 let openAiClient = null;
 let pgvectorReadyCache = null;
@@ -309,6 +309,9 @@ export async function indexApprovedDocumentChunks(documentId) {
 
   try {
     await client.query("BEGIN");
+
+    // Advisory lock on document ID to prevent concurrent indexing deadlocks
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1::text))", [documentId]);
 
     const documentResult = await client.query(
       `SELECT kd.id, kd.title, kd.domain, kd.source_type, kd.metadata, kd.status, kd.raw_text,
@@ -722,14 +725,82 @@ async function searchKnowledgeChunksJs(query, limit, departmentId) {
     .slice(0, limit);
 }
 
-export async function searchKnowledgeChunks(query, limit = 5, departmentId = null) {
-  const pgvectorReady = await isPgvectorReady();
+// ── Keyword / full-text search via tsvector + ILIKE fallback ─────────────────
+async function searchKnowledgeChunksKeyword(query, limit, departmentId) {
+  const params = [query, limit];
+  const deptFilter = departmentId ? `AND kd.department_id = $${params.push(departmentId)}` : "";
 
-  if (pgvectorReady) {
-    return searchKnowledgeChunksSql(query, limit, departmentId);
+  const result = await pool.query(
+    `SELECT kc.id, kc.content,
+            kd.id AS document_id, kd.title, kd.domain, kd.source_type,
+            d.name AS department,
+            ts_rank_cd(kc.content_tsv, plainto_tsquery('english', $1)) AS score
+     FROM knowledge_chunks kc
+     JOIN knowledge_documents kd ON kd.id = kc.document_id
+     JOIN departments d ON d.id = kd.department_id
+     WHERE kd.status = 'Approved'
+       AND (
+         kc.content_tsv @@ plainto_tsquery('english', $1)
+         OR kc.content ILIKE '%' || $1 || '%'
+       )
+       ${deptFilter}
+     ORDER BY score DESC, kc.chunk_index ASC
+     LIMIT $2`,
+    params
+  );
+
+  // Ensure ILIKE-only matches still get a non-zero score
+  return result.rows.map((row) => ({
+    ...row,
+    score: Number(row.score) > 0 ? Number(row.score) : 0.01
+  }));
+}
+
+// ── Hybrid search: semantic + keyword merged via Reciprocal Rank Fusion ──────
+async function searchKnowledgeChunksHybrid(query, limit, departmentId) {
+  const semanticLimit = limit * 2;
+  const keywordLimit = limit;
+
+  const pgvectorReady = await isPgvectorReady();
+  const semanticSearch = pgvectorReady
+    ? searchKnowledgeChunksSql(query, semanticLimit, departmentId)
+    : searchKnowledgeChunksJs(query, semanticLimit, departmentId);
+
+  let keywordResults = [];
+  try {
+    keywordResults = await searchKnowledgeChunksKeyword(query, keywordLimit, departmentId);
+  } catch (err) {
+    // tsvector column may not exist yet — fall back to semantic-only
+    console.warn("Keyword search unavailable, using semantic only:", err.message);
   }
 
-  return searchKnowledgeChunksJs(query, limit, departmentId);
+  const semanticResults = await semanticSearch;
+
+  // Reciprocal Rank Fusion (k = 60)
+  const RRF_K = 60;
+  const scoreMap = new Map();
+  const chunkMap = new Map();
+
+  semanticResults.forEach((row, rank) => {
+    const key = row.id;
+    chunkMap.set(key, row);
+    scoreMap.set(key, (scoreMap.get(key) || 0) + 1 / (RRF_K + rank + 1));
+  });
+
+  keywordResults.forEach((row, rank) => {
+    const key = row.id;
+    if (!chunkMap.has(key)) chunkMap.set(key, row);
+    scoreMap.set(key, (scoreMap.get(key) || 0) + 1 / (RRF_K + rank + 1));
+  });
+
+  return Array.from(chunkMap.entries())
+    .map(([id, chunk]) => ({ ...chunk, score: scoreMap.get(id) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+export async function searchKnowledgeChunks(query, limit = 15, departmentId = null) {
+  return searchKnowledgeChunksHybrid(query, limit, departmentId);
 }
 
 export async function getRetrievalHealth() {

@@ -15,7 +15,7 @@ export async function deleteConversation(token, conversationId) {
   });
 }
 
-export async function sendChatMessage({ token, conversationId, message, source = "text" }) {
+export async function sendChatMessage({ token, conversationId, message, source = "text", signal }) {
   return requestApi("/chat/messages", {
     token,
     options: {
@@ -24,7 +24,8 @@ export async function sendChatMessage({ token, conversationId, message, source =
         conversationId,
         message,
         source
-      })
+      }),
+      ...(signal ? { signal } : {})
     }
   });
 }

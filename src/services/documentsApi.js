@@ -57,6 +57,42 @@ export async function ingestDocumentUrl({ token, url, domain, departmentCode, ti
   });
 }
 
+export async function reuploadDocument({ token, documentId, file }) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_BASE_URL}/documents/${documentId}/reupload`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = payload?.message || "Re-upload failed";
+    const error = new Error(message);
+    error.statusCode = response.status;
+
+    if (response.status === 401) {
+      window.dispatchEvent(
+        new CustomEvent(SESSION_EXPIRED_EVENT, { detail: { code: "UNAUTHORIZED", message } })
+      );
+    }
+
+    throw error;
+  }
+
+  return payload;
+}
+
+export async function deleteDocument(token, documentId) {
+  return requestApi(`/documents/${documentId}`, {
+    token,
+    options: { method: "DELETE" }
+  });
+}
+
 export async function downloadDocument(token, documentId) {
   return requestApi(`/documents/${documentId}/download`, { token });
 }

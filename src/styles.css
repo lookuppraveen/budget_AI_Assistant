@@ -877,6 +877,52 @@ h1 {
   font-style: italic;
 }
 
+/* Stop / Clear action bar */
+.cp-action-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  justify-content: flex-end;
+}
+
+.cp-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.cp-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.cp-stop-btn {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.cp-stop-btn:not(:disabled):hover {
+  background: #fecaca;
+}
+
+.cp-clear-btn {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.cp-clear-btn:not(:disabled):hover {
+  background: #e2e8f0;
+}
+
 /* Bottom area */
 .cp-bottom {
   border-top: 1px solid var(--edge);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getSharePointConfig, syncSharePoint, testSharePointConnection } from "../../services/sharepointApi.js";
 import { getDepartments, reindexDocumentChunks } from "../../services/adminApi.js";
-import { downloadDocument, getDocuments, ingestDocumentUrl, searchKnowledge, uploadDocumentFiles } from "../../services/documentsApi.js";
+import { deleteDocument, downloadDocument, getDocuments, ingestDocumentUrl, reuploadDocument, searchKnowledge, uploadDocumentFiles } from "../../services/documentsApi.js";
 
 const allowedFileTypes = ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt";
 
@@ -55,6 +55,8 @@ export default function KnowledgePanel({ domains, authToken }) {
 
   // Queue submit state — keyed by item.id
   const [submittingIds, setSubmittingIds] = useState(new Set());
+  const [deletingIds, setDeletingIds] = useState(new Set());
+  const [reuploadingIds, setReuploadingIds] = useState(new Set());
   const [submitAllBusy, setSubmitAllBusy] = useState(false);
   const [queueMessage, setQueueMessage] = useState("");
 
@@ -341,8 +343,47 @@ export default function KnowledgePanel({ domains, authToken }) {
     }
   };
 
-  const handleRemoveItem = (itemId) => {
-    setUploadedItems((prev) => prev.filter((i) => i.id !== itemId));
+  const handleDeleteItem = async (item) => {
+    if (!window.confirm(`Delete "${item.name}" permanently? This cannot be undone.`)) return;
+
+    // No server document yet — just remove from UI
+    if (!item.documentId) {
+      setUploadedItems((prev) => prev.filter((i) => i.id !== item.id));
+      return;
+    }
+
+    setDeletingIds((prev) => new Set([...prev, item.id]));
+    setQueueMessage("");
+
+    try {
+      await deleteDocument(authToken, item.documentId);
+      setUploadedItems((prev) => prev.filter((i) => i.id !== item.id));
+      setQueueMessage(`Deleted: ${item.name}`);
+    } catch (err) {
+      setQueueMessage(`Delete failed for ${item.name}: ${err.message}`);
+    } finally {
+      setDeletingIds((prev) => { const next = new Set(prev); next.delete(item.id); return next; });
+    }
+  };
+
+  const handleReupload = async (item, file) => {
+    if (!item.documentId || !file) return;
+
+    setReuploadingIds((prev) => new Set([...prev, item.id]));
+    setQueueMessage("");
+
+    try {
+      const result = await reuploadDocument({ token: authToken, documentId: item.documentId, file });
+      const chars = result.document?.extractedChars || 0;
+      setUploadedItems((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, status: "done", size: `${chars.toLocaleString()} chars` } : i))
+      );
+      setQueueMessage(`Re-uploaded: ${item.name} — ${chars.toLocaleString()} chars extracted`);
+    } catch (err) {
+      setQueueMessage(`Re-upload failed for ${item.name}: ${err.message}`);
+    } finally {
+      setReuploadingIds((prev) => { const next = new Set(prev); next.delete(item.id); return next; });
+    }
   };
 
   const handleDownload = async (item) => {
@@ -735,7 +776,7 @@ export default function KnowledgePanel({ domains, authToken }) {
             </div>
             {uploadedItems.length === 0 && <p className="empty-queue" style={{ minWidth: "unset" }}>No items ingested yet.</p>}
             {uploadedItems.map((item) => {
-              const isBusy = submittingIds.has(item.id) || item.status === "uploading";
+              const isBusy = submittingIds.has(item.id) || deletingIds.has(item.id) || reuploadingIds.has(item.id) || item.status === "uploading";
               return (
                 <div className="queue-row" key={item.id}>
                   <span title={item.name}>{item.name}</span>
@@ -759,7 +800,7 @@ export default function KnowledgePanel({ domains, authToken }) {
                     fontSize: "0.8rem",
                     fontWeight: 600
                   }}>
-                    {item.status === "uploading" || submittingIds.has(item.id)
+                    {item.status === "uploading" || submittingIds.has(item.id) || reuploadingIds.has(item.id)
                       ? "Processing..."
                       : item.status === "done"
                       ? "Saved"
@@ -779,25 +820,41 @@ export default function KnowledgePanel({ domains, authToken }) {
                         {submittingIds.has(item.id) ? "…" : "Re-index"}
                       </button>
                     )}
-                    {item.documentId && (item.source === "Local Upload" || item.source === "Upload") && (
-                      <button
-                        type="button"
+                    {item.documentId && (
+                      <label
                         className="action-btn"
-                        style={{ padding: "0.2rem 0.5rem", fontSize: "0.72rem" }}
-                        disabled={isBusy}
-                        onClick={() => handleDownload(item)}
+                        style={{
+                          padding: "0.2rem 0.5rem",
+                          fontSize: "0.72rem",
+                          cursor: isBusy ? "not-allowed" : "pointer",
+                          opacity: isBusy ? 0.5 : 1,
+                          background: "var(--info-soft, #dbeafe)",
+                          color: "var(--info, #2563eb)",
+                          borderColor: "var(--info-border, #93c5fd)"
+                        }}
                       >
-                        Download
-                      </button>
+                        {reuploadingIds.has(item.id) ? "Uploading..." : "Re-upload"}
+                        <input
+                          type="file"
+                          accept={allowedFileTypes}
+                          style={{ display: "none" }}
+                          disabled={isBusy}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = "";
+                            if (file) handleReupload(item, file);
+                          }}
+                        />
+                      </label>
                     )}
                     <button
                       type="button"
                       className="action-btn"
-                      style={{ padding: "0.2rem 0.5rem", fontSize: "0.72rem", opacity: 0.65 }}
+                      style={{ padding: "0.2rem 0.5rem", fontSize: "0.72rem", background: "var(--danger-soft, #fee2e2)", color: "var(--danger, #dc2626)", borderColor: "var(--danger-border, #fca5a5)" }}
                       disabled={isBusy}
-                      onClick={() => handleRemoveItem(item.id)}
+                      onClick={() => handleDeleteItem(item)}
                     >
-                      Remove
+                      {deletingIds.has(item.id) ? "Deleting…" : "Delete"}
                     </button>
                   </span>
                 </div>

@@ -12,7 +12,7 @@ const documentIdParamSchema = z.object({
   params: z.object({ id: z.string().uuid("Invalid document id") }),
   query: z.object({})
 });
-import { createDocument, getDocumentDownloadUrl, ingestUrl, listDocuments, updateDocumentStatus, uploadDocuments } from "./documents.service.js";
+import { createDocument, deleteDocument, getDocumentDownloadUrl, ingestUrl, listDocuments, reuploadDocument, updateDocumentStatus, uploadDocuments } from "./documents.service.js";
 import { logAudit } from "../../utils/audit.js";
 
 const documentsRouter = Router();
@@ -104,6 +104,40 @@ documentsRouter.get(
   asyncHandler(async (req, res) => {
     const result = await getDocumentDownloadUrl(req.validated.params.id);
     res.status(200).json(result);
+  })
+);
+
+documentsRouter.put(
+  "/:id/reupload",
+  authenticate,
+  authorize("Admin", "Budget Analyst", "Department Editor"),
+  documentUpload.single("file"),
+  validate(documentIdParamSchema),
+  asyncHandler(async (req, res) => {
+    if (!req.file) {
+      const error = new Error("No file provided");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const result = await reuploadDocument(req.validated.params.id, req.file);
+    logAudit(req, "document.reuploaded", "document", req.validated.params.id, {
+      title: result.title,
+      extractedChars: result.extractedChars
+    });
+    res.status(200).json({ document: result });
+  })
+);
+
+documentsRouter.delete(
+  "/:id",
+  authenticate,
+  authorize("Admin", "Budget Analyst"),
+  validate(documentIdParamSchema),
+  asyncHandler(async (req, res) => {
+    const deleted = await deleteDocument(req.validated.params.id);
+    logAudit(req, "document.deleted", "document", req.validated.params.id, { title: deleted.title });
+    res.status(200).json({ message: "Document deleted.", id: deleted.id });
   })
 );
 

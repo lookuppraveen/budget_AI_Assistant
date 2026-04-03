@@ -8,6 +8,13 @@ export async function getConversationMessages(token, conversationId) {
   return requestApi(`/chat/conversations/${conversationId}/messages`, { token });
 }
 
+export async function deleteConversation(token, conversationId) {
+  return requestApi(`/chat/conversations/${conversationId}`, {
+    token,
+    options: { method: "DELETE" }
+  });
+}
+
 export async function sendChatMessage({ token, conversationId, message, source = "text" }) {
   return requestApi("/chat/messages", {
     token,

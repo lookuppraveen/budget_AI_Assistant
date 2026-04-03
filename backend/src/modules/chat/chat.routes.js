@@ -13,6 +13,7 @@ import {
   createChatTurn,
   createConversation,
   createVoiceLog,
+  deleteConversation,
   getConversationMessages,
   listConversations
 } from "./chat.service.js";
@@ -122,6 +123,31 @@ chatRouter.post(
     const departmentId = SCOPED_ROLES.includes(req.user.role) ? (req.user.departmentId || null) : null;
     const result = await createChatTurn(req.user.id, req.validated.body, departmentId);
     res.status(201).json(result);
+  })
+);
+
+/**
+ * @swagger
+ * /chat/conversations/{id}:
+ *   delete:
+ *     tags: [Chat]
+ *     summary: Delete a conversation and all its messages
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: Deleted }
+ *       404: { description: Conversation not found }
+ */
+chatRouter.delete(
+  "/conversations/:id",
+  authenticate,
+  validate(conversationParamsSchema),
+  asyncHandler(async (req, res) => {
+    await deleteConversation(req.validated.params.id, req.user.id);
+    res.status(200).json({ message: "Conversation deleted." });
   })
 );
 

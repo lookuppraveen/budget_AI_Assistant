@@ -296,6 +296,19 @@ export async function createChatTurn(userId, { conversationId, message, source }
   }
 }
 
+export async function deleteConversation(conversationId, userId) {
+  const result = await pool.query(
+    "DELETE FROM chat_conversations WHERE id = $1 AND user_id = $2 RETURNING id",
+    [conversationId, userId]
+  );
+
+  if (result.rowCount === 0) {
+    const error = new Error("Conversation not found");
+    error.statusCode = 404;
+    throw error;
+  }
+}
+
 export async function createVoiceLog(userId, { conversationId, eventType, direction, transcript, status, durationMs, metadata }) {
   const client = await pool.connect();
 

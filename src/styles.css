@@ -1181,6 +1181,47 @@ h1 {
   color: var(--ink-soft);
 }
 
+.cp-drawer-item-wrap {
+  display: flex;
+  align-items: stretch;
+}
+
+.cp-drawer-item-wrap .cp-drawer-item {
+  flex: 1;
+  border-radius: 8px 0 0 8px;
+}
+
+.cp-drawer-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  background: none;
+  border: 1px solid var(--edge);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.cp-drawer-item-wrap:hover .cp-drawer-delete {
+  opacity: 1;
+}
+
+.cp-drawer-delete:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+.cp-drawer-delete:disabled {
+  cursor: not-allowed;
+}
+
 /* Message bubble legacy compat */
 .msg { display: none; }
 .chat-form { display: none; }

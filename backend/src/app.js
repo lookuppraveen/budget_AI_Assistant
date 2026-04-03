@@ -28,26 +28,12 @@ import { errorHandler } from "./middleware/error-handler.js";
 
 const app = express();
 
-const corsOrigins = ["http://localhost:4000", "http://localhost:5173", "https://budget-ai-assistant.vercel.app", "https://budget-ai-assistant.vercel.app/,https://budgetaiassistance.myaisquad.com/"]
+const corsOrigins = ["http://localhost:4000", "http://localhost:5173", "https://budget-ai-assistant.vercel.app", "https://budget-ai-assistant.vercel.app/,https://budgetaiassistance.myaisquad.com/, https://budgetaiassistance.myaisquad.com"]
 app.use(helmet());
 app.use(hpp());
 app.use(
   cors({
-    origin(origin, callback) {
-      // Allow requests with no origin (Postman, curl, server-to-server)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      // Allow if origin is in whitelist
-      if (corsOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      // Otherwise block
-      return callback(new Error("Not allowed by CORS"));
-    },
-    credentials: true,
+    origin: "*",
   })
 );
 app.use(express.json({ limit: "10mb" }));

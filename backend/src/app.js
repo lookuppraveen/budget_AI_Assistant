@@ -28,7 +28,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 
 const app = express();
 
-const corsOrigins = ["http://localhost:4000", "http://localhost:5173", "https://budget-ai-assistant.vercel.app", "https://budget-ai-assistant.vercel.app/,https://budgetaiassistance.myaisquad.com"]
+const corsOrigins = ["http://localhost:4000", "http://localhost:5173", "https://budget-ai-assistant.vercel.app", "https://budget-ai-assistant.vercel.app/,https://budgetaiassistance.myaisquad.com/"]
 app.use(helmet());
 app.use(hpp());
 app.use(

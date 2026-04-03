@@ -31,6 +31,7 @@ const app = express();
 
 app.use(helmet());
 app.use(hpp());
+app.options("*", cors());
 app.use(
   cors({
     origin: (origin, callback) => {

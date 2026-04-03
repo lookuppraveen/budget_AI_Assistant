@@ -274,7 +274,15 @@ async function insertChunk(client, { documentId, chunkIndex, content, tokenCount
       `INSERT INTO knowledge_chunks (
          document_id, chunk_index, content, token_count, embedding, embedding_provider, embedding_model, embedding_vector
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector)
+       ON CONFLICT (document_id, chunk_index) DO UPDATE SET
+         content = EXCLUDED.content,
+         token_count = EXCLUDED.token_count,
+         embedding = EXCLUDED.embedding,
+         embedding_provider = EXCLUDED.embedding_provider,
+         embedding_model = EXCLUDED.embedding_model,
+         embedding_vector = EXCLUDED.embedding_vector,
+         updated_at = now()`,
       [documentId, chunkIndex, content, tokenCount, vector, provider, model, toPgvectorLiteral(vector)]
     );
     return;
@@ -284,7 +292,14 @@ async function insertChunk(client, { documentId, chunkIndex, content, tokenCount
     `INSERT INTO knowledge_chunks (
        document_id, chunk_index, content, token_count, embedding, embedding_provider, embedding_model
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (document_id, chunk_index) DO UPDATE SET
+       content = EXCLUDED.content,
+       token_count = EXCLUDED.token_count,
+       embedding = EXCLUDED.embedding,
+       embedding_provider = EXCLUDED.embedding_provider,
+       embedding_model = EXCLUDED.embedding_model,
+       updated_at = now()`,
     [documentId, chunkIndex, content, tokenCount, vector, provider, model]
   );
 }

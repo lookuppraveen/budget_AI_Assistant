@@ -121,16 +121,15 @@ export async function uploadDocuments({ files, domain, departmentCode }, current
       let document;
 
       if (existing.rowCount > 0) {
-        // Overwrite — delete old chunks then update the record
+        // Overwrite — update the existing record (indexApprovedDocumentChunks handles chunk cleanup)
         const existingId = existing.rows[0].id;
-        await pool.query(`DELETE FROM knowledge_chunks WHERE document_id = $1`, [existingId]);
         const updated = await pool.query(
           `UPDATE knowledge_documents
-         SET domain = $1, submitted_by = $2, metadata = $3::jsonb, raw_text = $4,
-             status = 'Pending', review_note = NULL, reviewed_by = NULL,
-             reviewed_at = NULL, updated_at = now()
-         WHERE id = $5
-         RETURNING id, title, source_type, domain, status, created_at`,
+           SET domain = $1, submitted_by = $2, metadata = $3::jsonb, raw_text = $4,
+               status = 'Pending', review_note = NULL, reviewed_by = NULL,
+               reviewed_at = NULL, updated_at = now()
+           WHERE id = $5
+           RETURNING id, title, source_type, domain, status, created_at`,
           [domain.trim(), currentUserId, JSON.stringify(metadata), rawText || null, existingId]
         );
         document = updated.rows[0];
@@ -138,8 +137,8 @@ export async function uploadDocuments({ files, domain, departmentCode }, current
         // New document
         const inserted = await pool.query(
           `INSERT INTO knowledge_documents (title, source_type, domain, department_id, submitted_by, metadata, raw_text)
-         VALUES ($1, 'Upload', $2, $3, $4, $5::jsonb, $6)
-         RETURNING id, title, source_type, domain, status, created_at`,
+           VALUES ($1, 'Upload', $2, $3, $4, $5::jsonb, $6)
+           RETURNING id, title, source_type, domain, status, created_at`,
           [title, domain.trim(), departmentId, currentUserId, JSON.stringify(metadata), rawText || null]
         );
         document = inserted.rows[0];

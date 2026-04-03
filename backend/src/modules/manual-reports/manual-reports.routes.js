@@ -73,6 +73,14 @@ manualReportsRouter.get(
     const safeName = report.title.replace(/[^a-z0-9_\-\s]/gi, "_").trim();
     const filename = `${safeName}.${ext}`;
 
+    if (report.format === "docx") {
+      const buffer = Buffer.from(report.content, "base64");
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", buffer.length);
+      return res.send(buffer);
+    }
+
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     return res.send(report.content);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getConversationMessages, listConversations } from "../../services/api.js";
+import { deleteConversation, getConversationMessages, listConversations } from "../../services/api.js";
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 function IconMic() {
@@ -114,6 +114,7 @@ export default function ChatPanel({
   const [conversations, setConversations] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loadingConvId, setLoadingConvId] = useState(null);
+  const [deletingConvId, setDeletingConvId] = useState(null);
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -143,6 +144,23 @@ export default function ChatPanel({
       /* silent */
     } finally {
       setLoadingConvId(null);
+    }
+  };
+
+  const handleDeleteConversation = async (e, convId) => {
+    e.stopPropagation();
+    if (deletingConvId) return;
+    setDeletingConvId(convId);
+    try {
+      await deleteConversation(authToken, convId);
+      setConversations((prev) => prev.filter((c) => c.id !== convId));
+      if (currentConversationId === convId) {
+        onClearChat();
+      }
+    } catch (_e) {
+      /* silent */
+    } finally {
+      setDeletingConvId(null);
     }
   };
 
@@ -251,7 +269,7 @@ export default function ChatPanel({
                   {isListening && <span className="cp-pulse" />}
                   <IconMic />
                 </button>
-                <span className="cp-vicon-label">{isListening ? "Listening…" : "Mic"}</span>
+                <span className="cp-vicon-label">{isListening ? "Listening…" : "Voice Input"}</span>
               </div>
 
               {/* Speaker */}
@@ -267,7 +285,7 @@ export default function ChatPanel({
                   {aiVoiceEnabled ? <IconSpeakerOn /> : <IconSpeakerOff />}
                 </button>
                 <span className="cp-vicon-label">
-                  {isSpeaking ? "Speaking…" : aiVoiceEnabled ? "AI Voice" : "Muted"}
+                  {isSpeaking ? "Speaking…" : aiVoiceEnabled ? "Voice Response" : "Muted"}
                 </span>
               </div>
 
@@ -282,7 +300,7 @@ export default function ChatPanel({
                 >
                   <IconTwoWay />
                 </button>
-                <span className="cp-vicon-label">{twoWayMode ? "Two-Way: On" : "Two-Way"}</span>
+                <span className="cp-vicon-label">{twoWayMode ? "Voice Chat: On" : "Voice Chat"}</span>
               </div>
             </div>
 
@@ -314,26 +332,36 @@ export default function ChatPanel({
                 <p className="cp-drawer-empty">No previous conversations yet.</p>
               )}
               {!historyLoading && conversations.map((conv) => (
-                <button
-                  key={conv.id}
-                  type="button"
-                  className={`cp-drawer-item ${conv.id === currentConversationId ? "cp-drawer-item-active" : ""}`}
-                  onClick={() => handleSelectConversation(conv.id)}
-                  disabled={!!loadingConvId}
-                >
-                  <span className="cp-drawer-item-icon">
-                    <IconHistory />
-                  </span>
-                  <span className="cp-drawer-item-body">
-                    <span className="cp-drawer-item-title">
-                      {conv.title || "Budget Conversation"}
+                <div key={conv.id} className="cp-drawer-item-wrap">
+                  <button
+                    type="button"
+                    className={`cp-drawer-item ${conv.id === currentConversationId ? "cp-drawer-item-active" : ""}`}
+                    onClick={() => handleSelectConversation(conv.id)}
+                    disabled={!!loadingConvId || !!deletingConvId}
+                  >
+                    <span className="cp-drawer-item-icon">
+                      <IconHistory />
                     </span>
-                    <span className="cp-drawer-item-time">
-                      {formatTime(conv.last_message_at || conv.updated_at)}
+                    <span className="cp-drawer-item-body">
+                      <span className="cp-drawer-item-title">
+                        {conv.title || "Budget Conversation"}
+                      </span>
+                      <span className="cp-drawer-item-time">
+                        {formatTime(conv.last_message_at || conv.updated_at)}
+                      </span>
                     </span>
-                  </span>
-                  {loadingConvId === conv.id && <span className="cp-drawer-item-loading">…</span>}
-                </button>
+                    {loadingConvId === conv.id && <span className="cp-drawer-item-loading">…</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="cp-drawer-delete"
+                    title="Delete conversation"
+                    disabled={!!loadingConvId || !!deletingConvId}
+                    onClick={(e) => handleDeleteConversation(e, conv.id)}
+                  >
+                    {deletingConvId === conv.id ? "…" : "✕"}
+                  </button>
+                </div>
               ))}
             </div>
           </aside>

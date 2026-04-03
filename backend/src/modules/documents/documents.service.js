@@ -346,6 +346,47 @@ export async function getDocumentDownloadUrl(documentId) {
   );
 }
 
+export async function reuploadDocument(documentId, file) {
+  const rawText = await extractText(file.buffer, file.mimetype);
+
+  const metadata = {
+    originalName: file.originalname,
+    mimeType: file.mimetype,
+    fileSize: file.size,
+    extractedChars: rawText.length,
+    reuploadedAt: new Date().toISOString()
+  };
+
+  const result = await pool.query(
+    `UPDATE knowledge_documents
+     SET raw_text = $1, metadata = $2::jsonb, updated_at = now()
+     WHERE id = $3
+     RETURNING id, title, status`,
+    [rawText || null, JSON.stringify(metadata), documentId]
+  );
+
+  if (result.rowCount === 0) {
+    throw Object.assign(new Error("Document not found"), { statusCode: 404 });
+  }
+
+  await indexApprovedDocumentChunks(documentId);
+
+  return { ...result.rows[0], extractedChars: rawText.length };
+}
+
+export async function deleteDocument(documentId) {
+  const result = await pool.query(
+    `DELETE FROM knowledge_documents WHERE id = $1 RETURNING id, title`,
+    [documentId]
+  );
+
+  if (result.rowCount === 0) {
+    throw Object.assign(new Error("Document not found"), { statusCode: 404 });
+  }
+
+  return result.rows[0];
+}
+
 export async function updateDocumentStatus(documentId, { status, reviewNote }, reviewerId) {
   const result = await pool.query(
     `UPDATE knowledge_documents

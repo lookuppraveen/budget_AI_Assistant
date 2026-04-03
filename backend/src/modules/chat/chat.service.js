@@ -24,7 +24,7 @@ function toMessagePayload(row) {
 }
 
 async function searchApprovedKnowledge(message, departmentId = null) {
-  const semanticMatches = await searchKnowledgeChunks(message, 8, departmentId);
+  const semanticMatches = await searchKnowledgeChunks(message, 15, departmentId);
   const citationMap = new Map();
   const chunks = [];
 
@@ -37,7 +37,7 @@ async function searchApprovedKnowledge(message, departmentId = null) {
     });
 
     const key = match.document_id;
-    if (!citationMap.has(key) && citationMap.size < 3) {
+    if (!citationMap.has(key) && citationMap.size < 5) {
       citationMap.set(key, {
         id: match.document_id,
         title: match.title,
@@ -89,9 +89,26 @@ async function generateLlmResponse(message, chunks, citations, history, source =
   try {
     const client = getOpenAiClient();
 
+    // Group chunks by source document for coherent context
+    const grouped = new Map();
+    for (const chunk of chunks) {
+      const key = chunk.title;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(chunk);
+    }
+
+    let sourceIndex = 0;
     const knowledgeContext = chunks.length
-      ? chunks
-          .map((chunk, i) => `[Source ${i + 1}: ${chunk.title} | ${chunk.domain}]\n${chunk.content}`)
+      ? Array.from(grouped.entries())
+          .map(([title, docChunks]) =>
+            docChunks
+              .map((c) => {
+                sourceIndex++;
+                const scorePct = typeof c.score === "number" ? ` — relevance: ${(c.score * 100).toFixed(0)}%` : "";
+                return `[Source ${sourceIndex}: "${title}" (${c.domain})${scorePct}]\n${c.content}`;
+              })
+              .join("\n\n")
+          )
           .join("\n\n---\n\n")
       : "No approved knowledge found for this query.";
 
@@ -108,12 +125,16 @@ PERSONALITY:
 - Use contractions (you'll, I'd, that's, here's) to sound human.
 - Keep your tone warm and supportive. Avoid stiff corporate language.
 - Answer the question first, then give context — don't bury the answer.
+- Give thorough, detailed answers. Don't be terse — if the sources contain useful detail, share it. Think of each answer as a mini briefing for the person asking.
+- When multiple sources are relevant, synthesize them together into a cohesive narrative rather than listing them separately.
 
 RULES:
-- Answer ONLY based on the approved knowledge sources provided below.
+- Answer based on the approved knowledge sources provided below.
 - If the sources don't contain relevant information, say so warmly and suggest the user reach out to their budget office.
 - Provide guidance and policy interpretation only — never execute transactions, approvals, or system actions.
-- When citing a source, weave it naturally into your sentence (e.g. "According to the FY26 Guidelines...") rather than using footnote-style references.
+- Cite sources by weaving document titles naturally into your response (e.g. "According to the FY26 Guidelines..." or "The Capital Projects Policy notes that..."). When drawing from multiple sources, reference each one where it contributes.
+- If you find information about a specific person, project, or line item mentioned across multiple sources, consolidate what each source says into a unified summary.
+- Structure longer answers with clear paragraphs. Use brief headers only when the answer covers multiple distinct topics.
 - Don't make up anything that isn't in the sources.${voiceGuidance}
 
 APPROVED KNOWLEDGE SOURCES:
@@ -121,8 +142,8 @@ ${knowledgeContext}`;
 
     const messages = [{ role: "system", content: systemPrompt }];
 
-    // Include last 6 turns of conversation history for context
-    for (const turn of history.slice(-6)) {
+    // Include last 10 turns of conversation history for context
+    for (const turn of history.slice(-10)) {
       messages.push({ role: turn.role, content: turn.content });
     }
 
@@ -131,8 +152,8 @@ ${knowledgeContext}`;
     const completion = await client.chat.completions.create({
       model: env.openAiChatModel,
       messages,
-      temperature: 0.4,
-      max_tokens: 800
+      temperature: 0.5,
+      max_tokens: 2000
     });
 
     return completion.choices[0].message.content.trim();

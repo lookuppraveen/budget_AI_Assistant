@@ -7,7 +7,7 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Install only production deps
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copy source code
 COPY . .

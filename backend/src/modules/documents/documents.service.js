@@ -82,6 +82,7 @@ export async function uploadDocuments({ files, domain, departmentCode }, current
 
     const departmentId = department.rows[0].id;
     const results = [];
+    console.log("sxec", s3Client);
 
     for (const file of files) {
       const title = file.originalname.trim();
@@ -90,7 +91,6 @@ export async function uploadDocuments({ files, domain, departmentCode }, current
 
       // Extract text from buffer before uploading so we have it for indexing
       const rawText = await extractText(file.buffer, file.mimetype);
-      console.log("sxec", s3Client);
       await s3Client.send(
         new PutObjectCommand({
           Bucket: env.awsBucket,

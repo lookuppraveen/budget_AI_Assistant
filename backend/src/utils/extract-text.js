@@ -70,8 +70,11 @@ async function ocrImage(worker, imageBuffer) {
 // ── Render PDF pages to images and OCR each one ──────────────────────────────
 async function extractPdfWithOcr(buffer) {
   // Lazy-import pdfjs legacy build (v3 CommonJS — solid Node.js support)
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.js").catch(() => null);
-  if (!pdfjsLib) return "";
+  const pdfjsModule = await import("pdfjs-dist/legacy/build/pdf.js").catch(() => null);
+  if (!pdfjsModule) return "";
+  // CommonJS modules imported via dynamic import expose exports under .default
+  const pdfjsLib = pdfjsModule.default ?? pdfjsModule;
+  if (!pdfjsLib?.getDocument) return "";
 
   const canvasFactory = new NodeCanvasFactory();
 

@@ -60,14 +60,11 @@ jobs:
           echo "🧹 Remove old images (optional)" 
           docker image prune -af || true 
 
-          echo "🚀 Run new container" 
+          echo "🚀 Run new container"
           docker run -d \
             --name budget_ai_backend \
             --network budget_ai_network \
             -p 4000:4000 \
             --restart=unless-stopped \
-            -e AWS_ACCESS_KEY=${{ secrets.AWS_ACCESS_KEY_ID }} \
-            -e AWS_SECRET_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
-            -e AWS_REGION=ap-south-1 \
-            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --env-file /home/ubuntu/.env \
             905418100231.dkr.ecr.us-east-1.amazonaws.com/budgetagent:latest

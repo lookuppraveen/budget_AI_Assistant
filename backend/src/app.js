@@ -34,21 +34,21 @@ app.use(hpp());
 app.use(
   cors({
     origin(origin, callback) {
+      // Allow requests with no origin (Postman, curl, server-to-server)
       if (!origin) {
-        callback(null, true);
-        return;
+        return callback(null, true);
       }
 
+      // Allow if origin is in whitelist
       if (corsOrigins.includes(origin)) {
-        if (corsOrigins.includes(origin)) {
-          callback(null, true);
-          return;
-        }
+        return callback(null, true);
+      }
 
-        callback(new Error("Not allowed by CORS"));
-      },
-      credentials: true
-    })
+      // Otherwise block
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
 );
 app.use(express.json({ limit: "10mb" }));
 

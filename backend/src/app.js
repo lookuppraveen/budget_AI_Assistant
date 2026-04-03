@@ -40,14 +40,15 @@ app.use(
       }
 
       if (corsOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
+        if (corsOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
 
-      callback(new Error("Not allowed by CORS"));
-    },
-    credentials: true
-  })
+        callback(new Error("Not allowed by CORS"));
+      },
+      credentials: true
+    })
 );
 app.use(express.json({ limit: "10mb" }));
 

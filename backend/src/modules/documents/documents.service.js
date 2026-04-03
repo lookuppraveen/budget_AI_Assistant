@@ -83,6 +83,7 @@ export async function uploadDocuments({ files, domain, departmentCode }, current
   const results = [];
 
   for (const file of files) {
+    const title = file.originalname.trim();
     const ext = path.extname(file.originalname).toLowerCase();
     const s3Key = `documents/${departmentCode.toUpperCase()}/${randomUUID()}${ext}`;
 
@@ -110,14 +111,39 @@ export async function uploadDocuments({ files, domain, departmentCode }, current
       extractedChars: rawText.length
     };
 
-    const result = await pool.query(
-      `INSERT INTO knowledge_documents (title, source_type, domain, department_id, submitted_by, metadata, raw_text)
-       VALUES ($1, 'Upload', $2, $3, $4, $5::jsonb, $6)
-       RETURNING id, title, source_type, domain, status, created_at`,
-      [file.originalname.trim(), domain.trim(), departmentId, currentUserId, JSON.stringify(metadata), rawText || null]
+    // Check if a document with the same title already exists in this department
+    const existing = await pool.query(
+      `SELECT id FROM knowledge_documents WHERE title = $1 AND department_id = $2`,
+      [title, departmentId]
     );
 
-    const document = result.rows[0];
+    let document;
+
+    if (existing.rowCount > 0) {
+      // Overwrite — delete old chunks then update the record
+      const existingId = existing.rows[0].id;
+      await pool.query(`DELETE FROM knowledge_chunks WHERE document_id = $1`, [existingId]);
+      const updated = await pool.query(
+        `UPDATE knowledge_documents
+         SET domain = $1, submitted_by = $2, metadata = $3::jsonb, raw_text = $4,
+             status = 'Pending', review_note = NULL, reviewed_by = NULL,
+             reviewed_at = NULL, updated_at = now()
+         WHERE id = $5
+         RETURNING id, title, source_type, domain, status, created_at`,
+        [domain.trim(), currentUserId, JSON.stringify(metadata), rawText || null, existingId]
+      );
+      document = updated.rows[0];
+    } else {
+      // New document
+      const inserted = await pool.query(
+        `INSERT INTO knowledge_documents (title, source_type, domain, department_id, submitted_by, metadata, raw_text)
+         VALUES ($1, 'Upload', $2, $3, $4, $5::jsonb, $6)
+         RETURNING id, title, source_type, domain, status, created_at`,
+        [title, domain.trim(), departmentId, currentUserId, JSON.stringify(metadata), rawText || null]
+      );
+      document = inserted.rows[0];
+    }
+
     await indexApprovedDocumentChunks(document.id);
 
     results.push({ ...document, s3Key, s3Url, originalName: file.originalname, extractedChars: rawText.length });

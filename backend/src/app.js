@@ -28,6 +28,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 
 const app = express();
 
+const corsOrigins = ["http://localhost:4000", "http://localhost:5173", "https://budget-ai-assistant.vercel.app", "https://budget-ai-assistant.vercel.app/"]
 app.use(helmet());
 app.use(hpp());
 app.use(
@@ -38,7 +39,7 @@ app.use(
         return;
       }
 
-      if (env.corsOrigins.includes(origin)) {
+      if (corsOrigins.includes(origin)) {
         callback(null, true);
         return;
       }
@@ -48,7 +49,7 @@ app.use(
     credentials: true
   })
 );
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api/v1";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://api.budgetagent.myaisquad.com/api/v1";
 export const SESSION_EXPIRED_EVENT = "budget_ai:session-expired";
 
 function emitSessionExpired(detail) {

@@ -21,7 +21,7 @@ export const env = {
   openAiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
   openAiChatModel: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
   embeddingDimensions: Number(process.env.EMBEDDING_DIMENSIONS || 1536),
-  corsOrigins: (process.env.CORS_ORIGIN || "http://127.0.0.1:5173,http://localhost:5173")
+  corsOrigins: (process.env.CORS_ORIGIN || "http://localhost:5174/,http://localhost:5173,https://budget-ai-assistant.vercel.app/")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean),
@@ -29,5 +29,5 @@ export const env = {
   awsSecretKey: process.env.AWS_SECRET_ACCESS_KEY || "",
   awsBucket: process.env.AWS_BUCKET || "",
   awsRegion: process.env.AWS_REGION || "us-east-1",
-  frontendUrl: process.env.FRONTEND_URL || "http://localhost:5173"
+  frontendUrl: process.env.FRONTEND_URL || "https://budget-ai-assistant.vercel.app"
 };

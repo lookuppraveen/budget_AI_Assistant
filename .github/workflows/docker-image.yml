@@ -1,0 +1,73 @@
+name: Docker Image Build and Test
+ 
+on:
+  push:
+    branches:
+      - main
+ 
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+ 
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+ 
+    - name: Display directory contents
+      run: |
+        ls -l
+ 
+    - name: Check AWS CLI version
+      run: aws --version
+ 
+    - name: Configure AWS credentials
+      run: |
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_KEY }}
+        aws configure set default.region ${{ secrets.AWS_REGION }}
+ 
+    - name: Build Docker image
+      run: |
+        cd backend
+        docker build -t budgetagent .
+ 
+    - name: AWS ECR Login
+      run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 905418100231.dkr.ecr.us-east-1.amazonaws.com
+ 
+    - name: Tag Docker image
+      run: docker tag budgetagent:latest 905418100231.dkr.ecr.us-east-1.amazonaws.com/budgetagent:latest
+ 
+    - name: Push Docker image to AWS ECR
+      run: docker push 905418100231.dkr.ecr.us-east-1.amazonaws.com/budgetagent:latest
+
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with: 
+        host: ${{ secrets.EC2_HOST }} 
+        username: ubuntu 
+        key: ${{ secrets.EC2_SSH_KEY }} 
+        script: | 
+          echo "🚀 Pull latest image" 
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 905418100231.dkr.ecr.us-east-1.amazonaws.com
+          docker pull 905418100231.dkr.ecr.us-east-1.amazonaws.com/budgetagent:latest 
+          
+          echo "🛑 Stop old container" 
+          docker stop budget_ai_backend || true 
+          
+          echo "❌ Remove old container" 
+          docker rm budget_ai_backend || true 
+          
+          echo "🧹 Remove old images (optional)" 
+          docker image prune -af || true 
+
+          echo "🚀 Run new container" 
+          docker run -d \
+            --name budget_ai_backend \
+            --network budget_ai_network \
+            -p 4000:4000 \
+            --restart=unless-stopped \
+            -e AWS_ACCESS_KEY=${{ secrets.AWS_ACCESS_KEY_ID }} \
+            -e AWS_SECRET_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+            -e AWS_REGION=ap-south-1 \
+            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            905418100231.dkr.ecr.us-east-1.amazonaws.com/budgetagent:latest

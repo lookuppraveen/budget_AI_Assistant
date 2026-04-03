@@ -1,10 +1,4 @@
-import { randomUUID } from "crypto";
-import path from "path";
-import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { pool } from "../../config/db.js";
-import { s3Client } from "../../config/s3.js";
-import { env } from "../../config/env.js";
 import { extractText } from "../../utils/extract-text.js";
 import { indexApprovedDocumentChunks } from "../retrieval/retrieval.service.js";
 
@@ -71,89 +65,62 @@ export async function createDocument({ title, sourceType, domain, departmentCode
 }
 
 export async function uploadDocuments({ files, domain, departmentCode }, currentUserId) {
-  try {
-    const department = await pool.query("SELECT id FROM departments WHERE upper(code) = upper($1)", [departmentCode]);
+  const department = await pool.query("SELECT id FROM departments WHERE upper(code) = upper($1)", [departmentCode]);
 
-    if (department.rowCount === 0) {
-      const error = new Error("Invalid department code");
-      error.statusCode = 400;
-      throw error;
-    }
-
-    const departmentId = department.rows[0].id;
-    const results = [];
-    console.log("sxec", s3Client);
-
-    for (const file of files) {
-      const title = file.originalname.trim();
-      const ext = path.extname(file.originalname).toLowerCase();
-      const s3Key = `documents/${departmentCode.toUpperCase()}/${randomUUID()}${ext}`;
-
-      // Extract text from buffer before uploading so we have it for indexing
-      const rawText = await extractText(file.buffer, file.mimetype);
-      await s3Client.send(
-        new PutObjectCommand({
-          Bucket: env.awsBucket,
-          Key: s3Key,
-          Body: file.buffer,
-          ContentType: file.mimetype,
-          ContentLength: file.size
-        })
-      );
-
-      const s3Url = `https://${env.awsBucket}.s3.${env.awsRegion}.amazonaws.com/${s3Key}`;
-
-      const metadata = {
-        s3Key,
-        s3Url,
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-        fileSize: file.size,
-        extractedChars: rawText.length
-      };
-
-      // Check if a document with the same title already exists in this department
-      const existing = await pool.query(
-        `SELECT id FROM knowledge_documents WHERE title = $1 AND department_id = $2`,
-        [title, departmentId]
-      );
-
-      let document;
-
-      if (existing.rowCount > 0) {
-        // Overwrite — update the existing record (indexApprovedDocumentChunks handles chunk cleanup)
-        const existingId = existing.rows[0].id;
-        const updated = await pool.query(
-          `UPDATE knowledge_documents
-           SET domain = $1, submitted_by = $2, metadata = $3::jsonb, raw_text = $4,
-               status = 'Pending', review_note = NULL, reviewed_by = NULL,
-               reviewed_at = NULL, updated_at = now()
-           WHERE id = $5
-           RETURNING id, title, source_type, domain, status, created_at`,
-          [domain.trim(), currentUserId, JSON.stringify(metadata), rawText || null, existingId]
-        );
-        document = updated.rows[0];
-      } else {
-        // New document
-        const inserted = await pool.query(
-          `INSERT INTO knowledge_documents (title, source_type, domain, department_id, submitted_by, metadata, raw_text)
-           VALUES ($1, 'Upload', $2, $3, $4, $5::jsonb, $6)
-           RETURNING id, title, source_type, domain, status, created_at`,
-          [title, domain.trim(), departmentId, currentUserId, JSON.stringify(metadata), rawText || null]
-        );
-        document = inserted.rows[0];
-      }
-
-      await indexApprovedDocumentChunks(document.id);
-
-      results.push({ ...document, s3Key, s3Url, originalName: file.originalname, extractedChars: rawText.length });
-    }
-
-    return results;
-  } catch (error) {
-    console.error("Error uploading documents:", error);
+  if (department.rowCount === 0) {
+    const error = new Error("Invalid department code");
+    error.statusCode = 400;
     throw error;
   }
+
+  const departmentId = department.rows[0].id;
+  const results = [];
+
+  for (const file of files) {
+    const title = file.originalname.trim();
+    const rawText = await extractText(file.buffer, file.mimetype);
+
+    const metadata = {
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+      fileSize: file.size,
+      extractedChars: rawText.length
+    };
+
+    // Upsert — overwrite if same filename already exists in this department
+    const existing = await pool.query(
+      `SELECT id FROM knowledge_documents WHERE title = $1 AND department_id = $2`,
+      [title, departmentId]
+    );
+
+    let document;
+
+    if (existing.rowCount > 0) {
+      const updated = await pool.query(
+        `UPDATE knowledge_documents
+         SET domain = $1, submitted_by = $2, metadata = $3::jsonb, raw_text = $4,
+             status = 'Pending', review_note = NULL, reviewed_by = NULL,
+             reviewed_at = NULL, updated_at = now()
+         WHERE id = $5
+         RETURNING id, title, source_type, domain, status, created_at`,
+        [domain.trim(), currentUserId, JSON.stringify(metadata), rawText || null, existing.rows[0].id]
+      );
+      document = updated.rows[0];
+    } else {
+      const inserted = await pool.query(
+        `INSERT INTO knowledge_documents (title, source_type, domain, department_id, submitted_by, metadata, raw_text)
+         VALUES ($1, 'Upload', $2, $3, $4, $5::jsonb, $6)
+         RETURNING id, title, source_type, domain, status, created_at`,
+        [title, domain.trim(), departmentId, currentUserId, JSON.stringify(metadata), rawText || null]
+      );
+      document = inserted.rows[0];
+    }
+
+    await indexApprovedDocumentChunks(document.id);
+    results.push({ ...document, originalName: file.originalname, extractedChars: rawText.length });
+  }
+
+  return results;
 }
 
 /** Returns true if the URL is a SharePoint or OneDrive sharing link */
@@ -364,7 +331,7 @@ export async function ingestUrl({ url, domain, departmentCode, title }, currentU
 
 export async function getDocumentDownloadUrl(documentId) {
   const result = await pool.query(
-    `SELECT id, title, source_type, metadata FROM knowledge_documents WHERE id = $1`,
+    `SELECT id, title, metadata FROM knowledge_documents WHERE id = $1`,
     [documentId]
   );
 
@@ -372,35 +339,11 @@ export async function getDocumentDownloadUrl(documentId) {
     throw Object.assign(new Error("Document not found"), { statusCode: 404 });
   }
 
-  const doc = result.rows[0];
-  const s3Key = doc.metadata?.s3Key;
-
-  if (!s3Key) {
-    throw Object.assign(
-      new Error("This document has no file stored — it was ingested from a URL or email and has no binary download."),
-      { statusCode: 422 }
-    );
-  }
-
-  if (!env.awsBucket) {
-    throw Object.assign(new Error("S3 is not configured on this server."), { statusCode: 503 });
-  }
-
-  const command = new GetObjectCommand({
-    Bucket: env.awsBucket,
-    Key: s3Key,
-    ResponseContentDisposition: `attachment; filename="${encodeURIComponent(doc.metadata.originalName || doc.title)}"`
-  });
-
-  // Pre-signed URL valid for 15 minutes
-  const url = await getSignedUrl(s3Client, command, { expiresIn: 900 });
-
-  return {
-    url,
-    filename: doc.metadata.originalName || doc.title,
-    mimeType: doc.metadata.mimeType || "application/octet-stream",
-    expiresInSeconds: 900
-  };
+  // Files are stored as extracted text in the DB — no binary download available
+  throw Object.assign(
+    new Error("Binary file download is not available. Documents are stored as extracted text only."),
+    { statusCode: 422 }
+  );
 }
 
 export async function updateDocumentStatus(documentId, { status, reviewNote }, reviewerId) {

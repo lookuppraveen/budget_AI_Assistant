@@ -120,7 +120,7 @@ export default function App() {
     return null;
   });
 
-  const [activePanel, setActivePanel] = useState("dashboard");
+  const [activePanel, setActivePanel] = useState("chat");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState(initialMessages);
   const [conversationId, setConversationId] = useState(null);
@@ -148,6 +148,10 @@ export default function App() {
   const currentAudioRef = useRef(null);
   // Tracks in-flight chat request so it can be aborted
   const chatAbortControllerRef = useRef(null);
+  const speechDebounceRef = useRef(null);
+  // Set to true to skip OpenAI TTS and always use browser SpeechSynthesis.
+  // Flip to false here if the project API key gains TTS model access.
+  const openAiTtsUnavailableRef = useRef(true);
 
   const clearSession = () => {
     setSessionUser(null);
@@ -359,15 +363,16 @@ export default function App() {
       return;
     }
 
+    let accumulatedTranscript = "";
+
     const recognition = new SpeechRecognition();
     recognition.lang = "en-US";
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
 
     recognition.onstart = () => {
       setIsListening(true);
       setVoiceStatus("Listening for your budget question...");
-      queueVoiceLog({ eventType: "stt_start", status: "listening" });
     };
 
     recognition.onresult = (event) => {
@@ -386,22 +391,48 @@ export default function App() {
       }
 
       if (interimTranscript.trim()) {
-        setDraft(interimTranscript.trim());
+        setDraft((accumulatedTranscript ? accumulatedTranscript + " " : "") + interimTranscript.trim());
       }
 
       const finalQuestion = finalTranscript.trim();
       if (finalQuestion && sendUserMessageRef.current) {
-        queueVoiceLog({
-          eventType: "user_utterance",
-          direction: "user",
-          transcript: finalQuestion,
-          status: "captured"
-        });
-        sendUserMessageRef.current(finalQuestion, "voice");
+        accumulatedTranscript += (accumulatedTranscript ? " " : "") + finalQuestion;
+        setDraft(accumulatedTranscript);
+
+        // Stop recognition immediately on first final result so the mic
+        // turns off and Chrome stops sending more events. The debounce then
+        // waits a beat before submitting, giving the user a moment to see
+        // their captured text before it sends.
+        if (recognitionRef.current && isListeningRef.current) {
+          recognitionRef.current.stop();
+        }
+
+        if (speechDebounceRef.current) {
+          clearTimeout(speechDebounceRef.current);
+        }
+
+        speechDebounceRef.current = window.setTimeout(() => {
+          const textToSend = accumulatedTranscript.trim();
+          accumulatedTranscript = "";
+          speechDebounceRef.current = null;
+          queueVoiceLog({
+            eventType: "user_utterance",
+            direction: "user",
+            transcript: textToSend,
+            status: "captured"
+          });
+          sendUserMessageRef.current(textToSend, "voice");
+        }, 800);
       }
     };
 
     recognition.onerror = (event) => {
+      // "aborted" fires on Chrome when recognition.stop() is called in continuous mode — not a real error
+      // "network" can fire transiently; treat silently so the UI doesn't alarm the user
+      if (event.error === "aborted" || event.error === "network") {
+        return;
+      }
+
       setIsListening(false);
 
       if (event.error === "not-allowed") {
@@ -422,7 +453,11 @@ export default function App() {
 
     recognition.onend = () => {
       setIsListening(false);
-      queueVoiceLog({ eventType: "stt_end", status: "stopped" });
+      // Only show "captured" status if a debounce is pending (meaning we
+      // stopped intentionally after a final result, not from a manual stop)
+      if (speechDebounceRef.current) {
+        setVoiceStatus("Got it — sending your question...");
+      }
 
       if (shouldAutoListenRef.current && !isSpeakingRef.current) {
         window.setTimeout(() => {
@@ -463,70 +498,128 @@ export default function App() {
     setVoiceStatus("Voice listening paused.");
   };
 
-  const speakAssistantReply = async (text) => {
-    if (!aiVoiceEnabledRef.current) return;
+  // Speak text using browser SpeechSynthesis (no API key needed)
+  const speakWithBrowser = (spokenText, onAudioStarted) => {
+    const synth = window.speechSynthesis;
+    if (!synth) return false;
+
+    synth.cancel(); // stop anything already speaking
+
+    const utterance = new SpeechSynthesisUtterance(spokenText);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    // Prefer a natural English voice if available
+    const voices = synth.getVoices();
+    const preferred = voices.find((v) => v.lang.startsWith("en") && v.localService) || voices.find((v) => v.lang.startsWith("en"));
+    if (preferred) utterance.voice = preferred;
+
+    utterance.onstart = () => {
+      if (onAudioStarted) onAudioStarted();
+    };
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setVoiceStatus(
+        twoWayModeRef.current
+          ? "Two-way mode active. Listening again..."
+          : "Assistant response delivered."
+      );
+      if (shouldAutoListenRef.current) {
+        window.setTimeout(safeStartListening, 400);
+      }
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      if (onAudioStarted) onAudioStarted();
+    };
+
+    synth.speak(utterance);
+    return true;
+  };
+
+  const speakAssistantReply = async (text, onAudioStarted = null) => {
+    if (!aiVoiceEnabledRef.current) {
+      if (onAudioStarted) onAudioStarted();
+      return;
+    }
 
     const spokenText = cleanTextForSpeech(text);
-    if (!spokenText || !sessionTokenRef.current) return;
+    if (!spokenText) {
+      if (onAudioStarted) onAudioStarted();
+      return;
+    }
 
     // Stop any audio already playing
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
     }
+    window.speechSynthesis?.cancel();
 
     setIsSpeaking(true);
     setVoiceStatus("Assistant is speaking...");
-    queueVoiceLog({ eventType: "tts_start", direction: "assistant", status: "speaking" });
 
-    try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api/v1";
-      const response = await fetch(`${apiBase}/tts/speak`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionTokenRef.current}`
-        },
-        body: JSON.stringify({ text: spokenText, voice: "nova" })
-      });
+    // Try OpenAI TTS first; fall back to browser SpeechSynthesis on any error.
+    // Once it fails once (403/500 = no model access), skip it for the rest of the session.
+    if (sessionTokenRef.current && !openAiTtsUnavailableRef.current) {
+      try {
+        const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api/v1";
+        const response = await fetch(`${apiBase}/tts/speak`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionTokenRef.current}`
+          },
+          body: JSON.stringify({ text: spokenText, voice: "nova" })
+        });
 
-      if (!response.ok) {
-        throw new Error("TTS request failed");
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      currentAudioRef.current = audio;
-
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        currentAudioRef.current = null;
-        setIsSpeaking(false);
-        setVoiceStatus(
-          twoWayModeRef.current
-            ? "Two-way mode active. Listening again..."
-            : "Assistant response delivered."
-        );
-        queueVoiceLog({ eventType: "tts_end", direction: "assistant", status: "completed" });
-        if (shouldAutoListenRef.current) {
-          window.setTimeout(safeStartListening, 400);
+        if (!response.ok) {
+          openAiTtsUnavailableRef.current = true;
+          throw new Error(`TTS ${response.status}`);
         }
-      };
 
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        currentAudioRef.current = null;
-        setIsSpeaking(false);
-        setVoiceStatus("Voice playback failed. Text response is still available.");
-        queueVoiceLog({ eventType: "tts_error", direction: "assistant", status: "failed" });
-      };
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudioRef.current = audio;
 
-      await audio.play();
-    } catch (_err) {
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          currentAudioRef.current = null;
+          setIsSpeaking(false);
+          setVoiceStatus(
+            twoWayModeRef.current
+              ? "Two-way mode active. Listening again..."
+              : "Assistant response delivered."
+          );
+          if (shouldAutoListenRef.current) {
+            window.setTimeout(safeStartListening, 400);
+          }
+        };
+
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          currentAudioRef.current = null;
+          speakWithBrowser(spokenText, null);
+        };
+
+        await audio.play();
+        if (onAudioStarted) onAudioStarted();
+        return;
+      } catch (_err) {
+        // OpenAI TTS unavailable — fall through to browser TTS and skip next time
+        openAiTtsUnavailableRef.current = true;
+      }
+    }
+
+    // Browser SpeechSynthesis fallback
+    const started = speakWithBrowser(spokenText, onAudioStarted);
+    if (!started) {
+      if (onAudioStarted) onAudioStarted();
       setIsSpeaking(false);
       setVoiceStatus("Voice playback failed. Text response is still available.");
-      queueVoiceLog({ eventType: "tts_error", direction: "assistant", status: "failed" });
     }
   };
 
@@ -569,8 +662,9 @@ export default function App() {
           "I was unable to generate a response from saved history. Please try again."
       };
 
-      setMessages((previous) => [...previous, assistantReply]);
-      speakAssistantReply(assistantReply.text);
+      speakAssistantReply(assistantReply.text, () => {
+        setMessages((previous) => [...previous, assistantReply]);
+      });
     } catch (error) {
       if (error?.name === "AbortError") {
         return;
@@ -634,7 +728,6 @@ export default function App() {
 
     if (nextValue) {
       setVoiceStatus("Two-way mode enabled. Ask your budget question by voice.");
-      queueVoiceLog({ eventType: "toggle_two_way", status: "enabled" });
       safeStartListening();
       return;
     }
@@ -644,7 +737,6 @@ export default function App() {
     }
 
     setVoiceStatus("Two-way mode disabled.");
-    queueVoiceLog({ eventType: "toggle_two_way", status: "disabled" });
   };
 
   const toggleAiVoice = () => {
@@ -743,9 +835,9 @@ export default function App() {
         <section className="panel-wrap">
           {hasPanelAccess(sessionUser.role, activePanel) ? (
             <>
-              {activePanel === "dashboard" && <DashboardPanel authToken={sessionUser.token} />}
+              {activePanel === "dashboard" && <DashboardPanel authToken={sessionUser.token} user={sessionUser} onNavigate={setActivePanel} />}
 
-              {activePanel === "reports" && <ReportsPanel authToken={sessionUser.token} />}
+              {activePanel === "reports" && <ReportsPanel authToken={sessionUser.token} user={sessionUser} />}
 
               {activePanel === "manualreports" && (
                 <ManualReportsPanel

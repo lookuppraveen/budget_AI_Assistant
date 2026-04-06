@@ -33,7 +33,7 @@ ttsRouter.post(
     const cleanText = text.trim().slice(0, 4096);
 
     const response = await getClient().audio.speech.create({
-      model: "tts-1",
+      model: env.openAiTtsModel,
       voice,
       input: cleanText,
       response_format: "mp3"

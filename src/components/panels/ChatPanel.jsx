@@ -318,7 +318,7 @@ export default function ChatPanel({
                   {aiVoiceEnabled ? <IconSpeakerOn /> : <IconSpeakerOff />}
                 </button>
                 <span className="cp-vicon-label">
-                  {isSpeaking ? "Speaking…" : aiVoiceEnabled ? "Voice Response" : "Muted"}
+                  {isSpeaking ? "Speaking…" : aiVoiceEnabled ? "Voice + Text Response" : "Muted"}
                 </span>
               </div>
 

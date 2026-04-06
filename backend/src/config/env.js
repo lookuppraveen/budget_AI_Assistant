@@ -1,6 +1,9 @@
 ﻿import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 const required = ["DATABASE_URL", "JWT_SECRET"];
 
@@ -20,6 +23,7 @@ export const env = {
   openAiApiKey: process.env.OPENAI_API_KEY || "",
   openAiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
   openAiChatModel: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
+  openAiTtsModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
   embeddingDimensions: Number(process.env.EMBEDDING_DIMENSIONS || 1536),
   corsOrigins: (process.env.CORS_ORIGIN || "http://localhost:5174/,http://localhost:5173,https://budget-ai-assistant.vercel.app/,https://budgetaiassistance.myaisquad.com,https://budgetaiassistance.myaisquad.com/")
     .split(",")

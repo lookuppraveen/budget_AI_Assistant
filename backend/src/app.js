@@ -51,7 +51,7 @@ app.use(express.json({ limit: "10mb" }));
 
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 500,
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -59,6 +59,16 @@ const globalLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 50,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Voice-session logging fires several times per voice turn (STT start/end,
+// TTS start/end, utterance captured). Give it its own generous bucket so
+// it never competes with the main chat/API budget.
+const voiceSessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 2000,
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -74,6 +84,7 @@ app.use("/api/v1/master-data", masterDataRouter);
 app.use("/api/v1/documents", documentsRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/reports", reportsRouter);
+app.use("/api/v1/chat/voice-sessions", voiceSessionLimiter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/retrieval", retrievalRouter);
 app.use("/api/v1/agent-configs", agentConfigRouter);

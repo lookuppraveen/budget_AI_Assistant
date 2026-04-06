@@ -410,7 +410,8 @@ export async function getReportsSummary() {
     deptsWithApprovedDocRes,
     totalAssistantRes,
     resolvedAssistantRes,
-    recentRunsRes
+    recentRunsRes,
+    monthlyRunsRes
   ] = await Promise.all([
     pool.query(`SELECT status, COUNT(*)::int AS count FROM report_runs GROUP BY status`),
     pool.query(
@@ -439,6 +440,15 @@ export async function getReportsSummary() {
     ),
     pool.query(
       `SELECT report_name, status, updated_at FROM report_runs ORDER BY updated_at DESC LIMIT 4`
+    ),
+    pool.query(
+      `SELECT to_char(date_trunc('month', created_at), 'Mon YYYY') AS month,
+              date_trunc('month', created_at) AS month_start,
+              COUNT(*)::int AS count
+       FROM report_runs
+       WHERE created_at >= date_trunc('month', now()) - interval '5 months'
+       GROUP BY month_start, month
+       ORDER BY month_start ASC`
     )
   ]);
 
@@ -498,5 +508,17 @@ export async function getReportsSummary() {
     timeline.push({ time: "—", title: "No reports generated yet", stage: "upcoming" });
   }
 
-  return { status: statusMap, slaMetrics, matrixCols: ["Policies", "Procedures", "History", "Training"], completenessMatrix, timeline };
+  // Build last-6-months array, filling zeros for months with no reports
+  const now = new Date();
+  const monthly = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+    const label = d.toLocaleString("en-US", { month: "short" });
+    const match = monthlyRunsRes.rows.find((r) => {
+      const rd = new Date(r.month_start);
+      return rd.getFullYear() === d.getFullYear() && rd.getMonth() === d.getMonth();
+    });
+    return { label, count: match ? match.count : 0 };
+  });
+
+  return { status: statusMap, slaMetrics, matrixCols: ["Policies", "Procedures", "History", "Training"], completenessMatrix, timeline, monthly };
 }

@@ -15,7 +15,8 @@ import {
   createVoiceLog,
   deleteConversation,
   getConversationMessages,
-  listConversations
+  listConversations,
+  streamChatTurn
 } from "./chat.service.js";
 
 const chatRouter = Router();
@@ -149,6 +150,51 @@ chatRouter.delete(
     await deleteConversation(req.validated.params.id, req.user.id);
     res.status(200).json({ message: "Conversation deleted." });
   })
+);
+
+// ── Streaming endpoint — Server-Sent Events ───────────────────────────────────
+// Sends: citations event → token events (one per chunk) → done event
+chatRouter.post(
+  "/messages/stream",
+  authenticate,
+  validate(createChatMessageSchema),
+  (req, res) => {
+    const SCOPED_ROLES = ["Department Editor", "Read Only"];
+    const departmentId = SCOPED_ROLES.includes(req.user.role) ? (req.user.departmentId || null) : null;
+
+    // SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+    res.flushHeaders();
+
+    const send = (data) => {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      }
+    };
+
+    // Handle client disconnect mid-stream
+    let aborted = false;
+    req.on("close", () => { aborted = true; });
+
+    streamChatTurn(
+      req.user.id,
+      req.validated.body,
+      departmentId,
+      (citations) => { if (!aborted) send({ type: "citations", citations }); },
+      (token)     => { if (!aborted) send({ type: "token", token }); },
+      (result)    => { if (!aborted) send({ type: "done", ...result }); }
+    )
+      .catch((err) => {
+        console.error("streamChatTurn error:", err.message);
+        send({ type: "error", message: "Failed to generate response. Please try again." });
+      })
+      .finally(() => {
+        if (!res.writableEnded) res.end();
+      });
+  }
 );
 
 chatRouter.post(

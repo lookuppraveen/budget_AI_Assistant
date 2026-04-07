@@ -1980,6 +1980,20 @@ h1 {
   border-bottom-right-radius: 4px;
 }
 
+/* Blinking cursor shown while streaming is in progress */
+.cp-msg-streaming .cp-msg-text::after {
+  content: "▍";
+  display: inline-block;
+  animation: blink-cursor 0.7s step-end infinite;
+  color: #0183c9;
+  margin-left: 2px;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
 .cp-msg-assistant .cp-msg-text {
   background: #f2f7fa;
   color: var(--ink);

@@ -182,7 +182,7 @@ export default function ChatPanel({
       {/* ── Chat window ────────────────────────────────────────────── */}
       <div className="cp-messages" role="log" aria-live="polite">
         {messages.map((msg, i) => (
-          <div key={`${msg.role}-${i}`} className={`cp-msg cp-msg-${msg.role}`}>
+          <div key={`${msg.role}-${i}`} className={`cp-msg cp-msg-${msg.role}${msg._streamingKey ? " cp-msg-streaming" : ""}`}>
             <span className="cp-msg-label">{msg.role === "user" ? "You" : "Assistant"}</span>
             <p className="cp-msg-text">{msg.text}</p>
             {msg.source === "voice" && (

@@ -81,44 +81,34 @@ function buildFallbackResponse(message, citations) {
   return `Guidance-only response from approved knowledge (${domainList}): I can provide policy interpretation and process support, but I do not execute live approvals or transactions. Start with "${topSource.title}" and related cited sources below.`;
 }
 
-async function generateLlmResponse(message, chunks, citations, history, source = "text") {
-  if (!env.openAiApiKey) {
-    return buildFallbackResponse(message, citations);
+// Shared: build the system prompt and message array for OpenAI
+function buildOpenAiMessages(message, chunks, history, source) {
+  const grouped = new Map();
+  for (const chunk of chunks) {
+    if (!grouped.has(chunk.title)) grouped.set(chunk.title, []);
+    grouped.get(chunk.title).push(chunk);
   }
 
-  try {
-    const client = getOpenAiClient();
+  let sourceIndex = 0;
+  const knowledgeContext = chunks.length
+    ? Array.from(grouped.entries())
+        .map(([title, docChunks]) =>
+          docChunks
+            .map((c) => {
+              sourceIndex++;
+              const scorePct = typeof c.score === "number" ? ` — relevance: ${(c.score * 100).toFixed(0)}%` : "";
+              return `[Source ${sourceIndex}: "${title}" (${c.domain})${scorePct}]\n${c.content}`;
+            })
+            .join("\n\n")
+        )
+        .join("\n\n---\n\n")
+    : "No approved knowledge found for this query.";
 
-    // Group chunks by source document for coherent context
-    const grouped = new Map();
-    for (const chunk of chunks) {
-      const key = chunk.title;
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push(chunk);
-    }
+  const voiceGuidance = source === "voice"
+    ? `\n- This response will be read aloud by text-to-speech. Write in short, natural spoken sentences. Do NOT use bullet points, numbered lists, bold text, headers, or markdown of any kind. Speak as if talking directly to the person.`
+    : "";
 
-    let sourceIndex = 0;
-    const knowledgeContext = chunks.length
-      ? Array.from(grouped.entries())
-          .map(([title, docChunks]) =>
-            docChunks
-              .map((c) => {
-                sourceIndex++;
-                const scorePct = typeof c.score === "number" ? ` — relevance: ${(c.score * 100).toFixed(0)}%` : "";
-                return `[Source ${sourceIndex}: "${title}" (${c.domain})${scorePct}]\n${c.content}`;
-              })
-              .join("\n\n")
-          )
-          .join("\n\n---\n\n")
-      : "No approved knowledge found for this query.";
-
-    // Voice responses need shorter, cleaner sentences with no markdown —
-    // they will be read aloud and long bullets sound terrible over TTS.
-    const voiceGuidance = source === "voice"
-      ? `\n- This response will be read aloud by text-to-speech. Write in short, natural spoken sentences. Do NOT use bullet points, numbered lists, bold text, headers, or markdown of any kind. Speak as if talking directly to the person.`
-      : "";
-
-    const systemPrompt = `You are a warm, knowledgeable Budget Assistant — think of yourself as a helpful colleague who happens to know all the budget policies inside out. Your job is to help staff understand policies, procedures, and guidelines in a friendly and approachable way.
+  const systemPrompt = `You are a warm, knowledgeable Budget Assistant — think of yourself as a helpful colleague who happens to know all the budget policies inside out. Your job is to help staff understand policies, procedures, and guidelines in a friendly and approachable way.
 
 PERSONALITY:
 - Speak naturally and conversationally, like a trusted colleague — not like a formal document or an IVR system.
@@ -140,26 +130,63 @@ RULES:
 APPROVED KNOWLEDGE SOURCES:
 ${knowledgeContext}`;
 
-    const messages = [{ role: "system", content: systemPrompt }];
+  const messages = [{ role: "system", content: systemPrompt }];
+  for (const turn of history.slice(-10)) {
+    messages.push({ role: turn.role, content: turn.content });
+  }
+  messages.push({ role: "user", content: message });
+  return messages;
+}
 
-    // Include last 10 turns of conversation history for context
-    for (const turn of history.slice(-10)) {
-      messages.push({ role: turn.role, content: turn.content });
-    }
-
-    messages.push({ role: "user", content: message });
-
-    const completion = await client.chat.completions.create({
+// Non-streaming (kept for backward compatibility)
+async function generateLlmResponse(message, chunks, citations, history, source = "text") {
+  if (!env.openAiApiKey) return buildFallbackResponse(message, citations);
+  try {
+    const messages = buildOpenAiMessages(message, chunks, history, source);
+    const completion = await getOpenAiClient().chat.completions.create({
       model: env.openAiChatModel,
       messages,
       temperature: 0.5,
       max_tokens: 2000
     });
-
     return completion.choices[0].message.content.trim();
   } catch (error) {
     console.error("OpenAI chat completion failed, falling back to template response.", error.message);
     return buildFallbackResponse(message, citations);
+  }
+}
+
+// Streaming — calls onToken(chunk) for each token, returns full accumulated text
+async function streamLlmResponse(message, chunks, citations, history, source, onToken) {
+  if (!env.openAiApiKey) {
+    const fallback = buildFallbackResponse(message, citations);
+    onToken(fallback);
+    return fallback;
+  }
+  try {
+    const messages = buildOpenAiMessages(message, chunks, history, source);
+    const stream = await getOpenAiClient().chat.completions.create({
+      model: env.openAiChatModel,
+      messages,
+      temperature: 0.5,
+      max_tokens: 2000,
+      stream: true
+    });
+
+    let fullText = "";
+    for await (const chunk of stream) {
+      const token = chunk.choices[0]?.delta?.content || "";
+      if (token) {
+        fullText += token;
+        onToken(token);
+      }
+    }
+    return fullText;
+  } catch (error) {
+    console.error("OpenAI streaming failed, using fallback.", error.message);
+    const fallback = buildFallbackResponse(message, citations);
+    onToken(fallback);
+    return fallback;
   }
 }
 
@@ -314,6 +341,115 @@ export async function createChatTurn(userId, { conversationId, message, source }
     throw error;
   } finally {
     client.release();
+  }
+}
+
+// Streaming chat turn — uses SSE callbacks instead of returning a full response.
+// onCitations(citations[]) — called once after knowledge search completes
+// onToken(tokenString)     — called for each streamed token
+// onDone({ conversation, userMessage, assistantMessage }) — called after DB save
+export async function streamChatTurn(userId, { conversationId, message, source }, departmentId, onCitations, onToken, onDone) {
+  // ── Phase 1: setup conversation + insert user message ────────────────────
+  let resolvedConversationId = conversationId;
+  let userMessageRow;
+  let history;
+
+  {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      if (resolvedConversationId) {
+        await getOwnedConversation(client, resolvedConversationId, userId);
+      } else {
+        const r = await client.query(
+          `INSERT INTO chat_conversations (user_id, title) VALUES ($1, $2) RETURNING id`,
+          [userId, "Budget Assistant Conversation"]
+        );
+        resolvedConversationId = r.rows[0].id;
+      }
+
+      const historyResult = await client.query(
+        `SELECT role, content FROM chat_messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
+        [resolvedConversationId]
+      );
+      history = historyResult.rows;
+
+      const userMsg = await client.query(
+        `INSERT INTO chat_messages (conversation_id, role, source, content)
+         VALUES ($1, 'user', $2, $3)
+         RETURNING id, role, source, content, created_at`,
+        [resolvedConversationId, source, message.trim()]
+      );
+      userMessageRow = userMsg.rows[0];
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  // ── Phase 2: knowledge search (no DB connection held) ────────────────────
+  let { citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId);
+  if (!citations.length) {
+    await indexAllApprovedDocuments();
+    ({ citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId));
+  }
+
+  onCitations(citations);
+
+  // ── Phase 3: stream OpenAI tokens ────────────────────────────────────────
+  const assistantText = await streamLlmResponse(message.trim(), chunks, citations, history, source, onToken);
+
+  // ── Phase 4: save assistant message to DB ────────────────────────────────
+  {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const assistantMsg = await client.query(
+        `INSERT INTO chat_messages (conversation_id, role, source, content, metadata)
+         VALUES ($1, 'assistant', 'text', $2, $3::jsonb)
+         RETURNING id, role, source, content, metadata, created_at`,
+        [
+          resolvedConversationId,
+          assistantText,
+          JSON.stringify({
+            citations: citations.map((c) => ({
+              id: c.id, title: c.title, domain: c.domain,
+              sourceType: c.source_type, department: c.department,
+              excerpt: c.excerpt, score: c.score
+            }))
+          })
+        ]
+      );
+
+      await client.query(
+        `UPDATE chat_conversations SET last_message_at = now(), updated_at = now() WHERE id = $1`,
+        [resolvedConversationId]
+      );
+
+      const conv = await client.query(
+        `SELECT id, title, last_message_at, created_at, updated_at FROM chat_conversations WHERE id = $1`,
+        [resolvedConversationId]
+      );
+
+      await client.query("COMMIT");
+
+      onDone({
+        conversation: conv.rows[0],
+        userMessage: toMessagePayload(userMessageRow),
+        assistantMessage: toMessagePayload(assistantMsg.rows[0])
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }
 

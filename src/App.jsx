@@ -631,61 +631,124 @@ export default function App() {
 
   const sendUserMessage = async (rawMessage, source = "text") => {
     const message = rawMessage.trim();
-    if (!message) {
-      return;
-    }
+    if (!message) return;
 
-    if (source === "voice") {
-      setVoiceStatus("Processing your voice question...");
-    }
+    if (source === "voice") setVoiceStatus("Processing your voice question...");
 
-    setMessages((previous) => [...previous, { role: "user", text: message, source }]);
+    // Show user message immediately
+    setMessages((prev) => [...prev, { role: "user", text: message, source }]);
     setDraft("");
 
     const abortController = new AbortController();
     chatAbortControllerRef.current = abortController;
     setIsSending(true);
 
+    // Unique key to track the streaming placeholder message
+    const streamingKey = `streaming-${Date.now()}`;
+
+    // Add empty assistant placeholder so user sees "response incoming"
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", text: "", source: "text", citations: [], _streamingKey: streamingKey }
+    ]);
+
     try {
-      const result = await sendChatMessage({
-        token: sessionUser.token,
-        conversationId: conversationIdRef.current || undefined,
-        message,
-        source,
+      const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api/v1";
+      const response = await fetch(`${apiBase}/chat/messages/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionUser.token}`
+        },
+        body: JSON.stringify({
+          conversationId: conversationIdRef.current || undefined,
+          message,
+          source
+        }),
         signal: abortController.signal
       });
 
-      if (result.conversation?.id) {
-        setConversationId(result.conversation.id);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
 
-      const assistantReply = {
-        role: result.assistantMessage?.role || "assistant",
-        source: result.assistantMessage?.source || "text",
-        citations: result.assistantMessage?.citations || [],
-        text:
-          result.assistantMessage?.text ||
-          "I was unable to generate a response from saved history. Please try again."
-      };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+      let receivedDone = false;
 
-      // Show text immediately on screen, then start voice at the same time.
-      // Voice + text response: both happen simultaneously — text appears as voice begins.
-      setMessages((previous) => [...previous, assistantReply]);
-      speakAssistantReply(assistantReply.text);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) continue;
+
+          let data;
+          try { data = JSON.parse(jsonStr); } catch (_) { continue; }
+
+          if (data.type === "citations") {
+            // Attach citations to placeholder as they arrive
+            setMessages((prev) => prev.map((m) =>
+              m._streamingKey === streamingKey ? { ...m, citations: data.citations } : m
+            ));
+          } else if (data.type === "token") {
+            fullText += data.token;
+            const snapshot = fullText;
+            setMessages((prev) => prev.map((m) =>
+              m._streamingKey === streamingKey ? { ...m, text: snapshot } : m
+            ));
+          } else if (data.type === "done") {
+            receivedDone = true;
+            if (data.conversation?.id) setConversationId(data.conversation.id);
+            // Replace placeholder with the persisted message (has DB id etc.)
+            const finalMsg = {
+              ...(data.assistantMessage || {}),
+              role: "assistant",
+              text: fullText || data.assistantMessage?.text || "",
+              citations: data.assistantMessage?.citations || [],
+            };
+            setMessages((prev) => prev.map((m) =>
+              m._streamingKey === streamingKey ? finalMsg : m
+            ));
+            // Start voice with the accumulated text
+            speakAssistantReply(fullText);
+          } else if (data.type === "error") {
+            throw new Error(data.message);
+          }
+        }
+      }
+
+      // Safety: if server closed without a done event, strip the streaming marker
+      if (!receivedDone) {
+        setMessages((prev) => prev.map((m) => {
+          if (m._streamingKey !== streamingKey) return m;
+          const { _streamingKey: _, ...rest } = m;
+          return { ...rest, text: fullText || "Response incomplete. Please try again." };
+        }));
+      }
+
     } catch (error) {
       if (error?.name === "AbortError") {
+        // Remove placeholder on user-initiated stop
+        setMessages((prev) => prev.filter((m) => m._streamingKey !== streamingKey));
         return;
       }
-      if (error?.statusCode === 401) {
-        return;
-      }
+      if (error?.status === 401 || error?.statusCode === 401) return;
 
-      const fallbackReply = {
-        role: "assistant",
-        source: "text",
-        text: `I could not reach the chat service: ${error.message || "unknown error"}.`
-      };
-      setMessages((previous) => [...previous, fallbackReply]);
+      // Replace placeholder with error message
+      setMessages((prev) => prev.map((m) =>
+        m._streamingKey === streamingKey
+          ? { role: "assistant", source: "text", text: `I could not reach the chat service: ${error.message || "unknown error"}.`, citations: [] }
+          : m
+      ));
     } finally {
       chatAbortControllerRef.current = null;
       setIsSending(false);

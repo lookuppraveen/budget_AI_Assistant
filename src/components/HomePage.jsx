@@ -148,10 +148,6 @@ export default function HomePage({ onGoToLogin }) {
               className="hp-nav-logo"
               onError={(e) => { e.currentTarget.style.display = "none"; }}
             />
-            <span className="hp-nav-brand-text">
-              <span className="hp-nav-brand-name">Budget Assistant</span>
-              <span className="hp-nav-brand-sub">STLCC AI Operating Center</span>
-            </span>
           </a>
           <button type="button" className="hp-nav-login" onClick={onGoToLogin}>
             Login
@@ -175,17 +171,6 @@ export default function HomePage({ onGoToLogin }) {
 
           {/* ③ Sub-text removed per request */}
 
-          <div className="hp-hero-cta">
-            <button type="button" className="hp-btn-primary" onClick={onGoToLogin}>
-              Login to Get Started
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                strokeLinecap="round" strokeLinejoin="round" width="18" height="18" aria-hidden="true">
-                <line x1="5" y1="12" x2="19" y2="12" />
-                <polyline points="12 5 19 12 12 19" />
-              </svg>
-            </button>
-          </div>
-
           <div className="hp-hero-stats">
             <div className="hp-hero-stat">
               <span className="hp-hero-stat-num">6</span>
@@ -201,6 +186,17 @@ export default function HomePage({ onGoToLogin }) {
               <span className="hp-hero-stat-num">100%</span>
               <span className="hp-hero-stat-label">Source-Grounded</span>
             </div>
+          </div>
+
+          <div className="hp-hero-cta">
+            <button type="button" className="hp-btn-primary" onClick={onGoToLogin}>
+              Login to Get Started
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round" width="18" height="18" aria-hidden="true">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
+            </button>
           </div>
         </div>
       </section>

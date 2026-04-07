@@ -66,11 +66,7 @@ const RECENT_ACTIVITY = [
   { time: "Apr 3, 2026", event: "Audit review completed: 97% AI confidence on 42 answers", type: "audit" },
 ];
 
-const SYSTEM_ALERTS_ADMIN = [
-  { level: "info", msg: "2 users pending role assignment — review in Admin Center" },
-  { level: "warn", msg: "Knowledge domain 'Board Presentations' has 3 documents awaiting indexing" },
-  { level: "info", msg: "Q2 budget submission window opens in 9 days" },
-];
+// Alerts now come from the live API — no hardcoded alerts
 
 // ── KPI card definitions per role ────────────────────────────────────────────
 
@@ -142,7 +138,8 @@ export default function DashboardPanel({ authToken, user, onNavigate }) {
 
   const kpis = buildKpis(role, data);
   const actions = QUICK_ACTIONS[role] || QUICK_ACTIONS["Read Only"];
-  const alerts = role === "Admin" ? SYSTEM_ALERTS_ADMIN : [];
+  // Real alerts from the API — only shown to Admin, empty array if no issues or data not loaded
+  const alerts = role === "Admin" ? (data?.alerts || []) : [];
 
   return (
     <article className="panel active">

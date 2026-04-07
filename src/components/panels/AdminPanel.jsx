@@ -1966,7 +1966,7 @@ export default function AdminPanel({ authToken }) {
             </div>
             {filteredDocuments.map((document) => (
               <div className="queue-row admin-doc-row" key={document.id}>
-                <span title={document.title}>{document.title}</span>
+                <span className="doc-title-cell" data-tooltip={document.title}>{document.title}</span>
                 <span>{document.department}</span>
                 <span>{document.domain}</span>
                 <span>{document.source}</span>

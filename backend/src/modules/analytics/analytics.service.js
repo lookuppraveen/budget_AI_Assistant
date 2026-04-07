@@ -235,14 +235,30 @@ export async function getDashboardAnalytics() {
     value: row.cnt
   }));
 
-  // --- Alerts ---
+  // --- Alerts — derived from real DB data, returned as { level, msg } objects ---
   const lowConfCount = lowConfRes.rows[0].count;
-  const emailStatus = emailRow?.status === "connected" ? "Email integration is connected." : "Email integration is not configured.";
   const alerts = [];
 
-  if (lowConfCount > 0) alerts.push(`${lowConfCount} low-confidence responses in the last 7 days need review`);
-  if (pendingReview > 0) alerts.push(`${pendingReview} documents pending review`);
-  alerts.push(emailStatus);
+  if (lowConfCount > 0) {
+    alerts.push({
+      level: "warn",
+      msg: `${lowConfCount} low-confidence AI response${lowConfCount > 1 ? "s" : ""} in the last 7 days — review in Citations & Audit`
+    });
+  }
+
+  if (pendingReview > 0) {
+    alerts.push({
+      level: "warn",
+      msg: `${pendingReview} document${pendingReview > 1 ? "s" : ""} pending review in Knowledge Domains`
+    });
+  }
+
+  if (emailRow?.status && emailRow.status !== "connected") {
+    alerts.push({
+      level: "info",
+      msg: "Email integration is not configured — set up in Email Assistant"
+    });
+  }
 
   return {
     kpis,

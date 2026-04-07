@@ -193,11 +193,51 @@ async function extractSpreadsheet(buffer, mimeType) {
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
-    const csv = XLSX.utils.sheet_to_csv(sheet, { strip: true });
-    if (csv.trim()) {
-      lines.push(`[Sheet: ${sheetName}]`);
-      lines.push(csv);
+
+    // Convert to array-of-arrays (raw rows) so we can work with headers
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+    if (!rows.length) continue;
+
+    lines.push(`[Sheet: ${sheetName}]`);
+
+    // Find the first non-empty row to use as headers
+    let headerRowIdx = 0;
+    for (let i = 0; i < Math.min(rows.length, 5); i++) {
+      if (rows[i].some((cell) => String(cell).trim())) {
+        headerRowIdx = i;
+        break;
+      }
     }
+
+    const headers = rows[headerRowIdx].map((h) => String(h).trim());
+    const hasHeaders = headers.some((h) => h && isNaN(Number(h)));
+
+    if (hasHeaders) {
+      // Emit each data row as "Header: Value | Header: Value" pairs
+      for (let r = headerRowIdx + 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row.some((cell) => String(cell).trim())) continue; // skip blank rows
+
+        const parts = [];
+        for (let c = 0; c < headers.length; c++) {
+          const header = headers[c];
+          const value = String(row[c] ?? "").trim();
+          if (header && value) {
+            parts.push(`${header}: ${value}`);
+          }
+        }
+        if (parts.length) {
+          lines.push(parts.join(" | "));
+        }
+      }
+    } else {
+      // No recognizable headers — fall back to CSV for this sheet
+      const csv = XLSX.utils.sheet_to_csv(sheet, { strip: true });
+      if (csv.trim()) lines.push(csv);
+    }
+
+    lines.push(""); // blank line between sheets
   }
 
   return lines.join("\n");

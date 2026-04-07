@@ -3039,6 +3039,41 @@ h1 {
   min-width: 860px;
 }
 
+/* Document name tooltip */
+.doc-title-cell {
+  position: relative;
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-title-cell::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 9999;
+  background: #1a2a3a;
+  color: #fff;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding: 6px 10px;
+  border-radius: 6px;
+  white-space: normal;
+  word-break: break-word;
+  max-width: 340px;
+  min-width: 120px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.22);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.18s, transform 0.18s;
+}
+.doc-title-cell:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .reports-head,
 .reports-row {
   min-width: 700px;

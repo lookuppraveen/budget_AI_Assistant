@@ -14,32 +14,14 @@ function IconMic() {
   );
 }
 
-function IconSpeakerOn() {
+// Headphones icon — represents Voice + Text mode (voice in & voice out)
+function IconVoiceText() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
       strokeLinecap="round" strokeLinejoin="round" width="24" height="24" aria-hidden="true">
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-    </svg>
-  );
-}
-
-function IconSpeakerOff() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-      strokeLinecap="round" strokeLinejoin="round" width="24" height="24" aria-hidden="true">
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" />
-    </svg>
-  );
-}
-
-function IconTwoWay() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-      strokeLinecap="round" strokeLinejoin="round" width="24" height="24" aria-hidden="true">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+      <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z" />
+      <path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
     </svg>
   );
 }
@@ -285,55 +267,46 @@ export default function ChatPanel({
           </button>
         </form>
 
-        {/* Voice icons row — right-aligned, below input */}
+        {/* Voice icons row — 2 modes below the text input */}
         {voiceSupported && (
           <div className="cp-voice-bar">
             <div className="cp-voice-icons">
 
-              {/* Mic */}
+              {/* Icon 1: Mic — voice input → text response only */}
               <div className="cp-vicon-wrap">
                 <button
                   type="button"
-                  className={`cp-vicon-btn cp-mic ${isListening ? "cp-active-green" : ""}`}
+                  className={`cp-vicon-btn cp-mic ${isListening && !twoWayMode ? "cp-active-green" : ""}`}
                   onClick={handleMicClick}
-                  disabled={!sttSupported}
-                  title={isListening ? "Stop listening" : "Start voice input"}
+                  disabled={!sttSupported || twoWayMode}
+                  title={isListening ? "Stop listening" : "Click to speak — response will be text only"}
                 >
-                  {isListening && <span className="cp-pulse" />}
+                  {isListening && !twoWayMode && <span className="cp-pulse" />}
                   <IconMic />
                 </button>
-                <span className="cp-vicon-label">{isListening ? "Listening…" : "Voice Input"}</span>
-              </div>
-
-              {/* Speaker */}
-              <div className="cp-vicon-wrap">
-                <button
-                  type="button"
-                  className={`cp-vicon-btn cp-speaker ${isSpeaking ? "cp-active-teal" : ""} ${!aiVoiceEnabled ? "cp-muted" : ""}`}
-                  onClick={onToggleAiVoice}
-                  disabled={!ttsSupported}
-                  title={aiVoiceEnabled ? "Mute AI voice" : "Enable AI voice"}
-                >
-                  {isSpeaking && <span className="cp-pulse cp-pulse-teal" />}
-                  {aiVoiceEnabled ? <IconSpeakerOn /> : <IconSpeakerOff />}
-                </button>
                 <span className="cp-vicon-label">
-                  {isSpeaking ? "Speaking…" : aiVoiceEnabled ? "Voice + Text Response" : "Muted"}
+                  {isListening && !twoWayMode ? "Listening…" : "Voice Input"}
                 </span>
               </div>
 
-              {/* Two-way */}
+              {/* Icon 2: Voice + Text — voice input + voice & text response simultaneously */}
               <div className="cp-vicon-wrap">
                 <button
                   type="button"
-                  className={`cp-vicon-btn cp-twowaybtn ${twoWayMode ? "cp-active-blue" : ""}`}
+                  className={`cp-vicon-btn cp-twowaybtn ${twoWayMode ? (isSpeaking ? "cp-active-teal" : "cp-active-blue") : ""}`}
                   onClick={onToggleTwoWayMode}
                   disabled={!sttSupported || !ttsSupported}
-                  title={twoWayMode ? "Disable two-way voice" : "Enable two-way voice"}
+                  title={twoWayMode ? "Disable Voice + Text mode" : "Enable Voice + Text mode — speak or type, get voice & text response"}
                 >
-                  <IconTwoWay />
+                  {twoWayMode && isSpeaking && <span className="cp-pulse cp-pulse-teal" />}
+                  {twoWayMode && isListening && !isSpeaking && <span className="cp-pulse" />}
+                  <IconVoiceText />
                 </button>
-                <span className="cp-vicon-label">{twoWayMode ? "Voice Chat: On" : "Voice Chat"}</span>
+                <span className="cp-vicon-label">
+                  {twoWayMode
+                    ? isSpeaking ? "Speaking…" : isListening ? "Listening…" : "Voice + Text: On"
+                    : "Voice + Text"}
+                </span>
               </div>
             </div>
 

@@ -160,6 +160,9 @@ h1 {
 }
 
 .nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   text-align: left;
   border: 1px solid transparent;
   background: #fff;
@@ -167,11 +170,31 @@ h1 {
   padding: 10px 12px;
   font: inherit;
   cursor: pointer;
+  color: var(--ink-soft);
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.nav-btn:hover {
+  background: #f0f7ff;
+  color: var(--ink);
+}
+
+.nav-btn svg {
+  flex-shrink: 0;
+  opacity: 0.65;
+  transition: opacity 0.15s;
+}
+
+.nav-btn:hover svg,
+.nav-btn.active svg {
+  opacity: 1;
 }
 
 .nav-btn.active {
   background: #deeeff;
   border-color: #7ab8d8;
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .next-box {
@@ -2198,7 +2221,7 @@ h1 {
   box-shadow: 0 0 0 3px rgba(22,163,74,0.2);
 }
 
-/* Speaker active — teal */
+/* Speaker active — teal (currently speaking) */
 .cp-vicon-btn.cp-active-teal {
   background: #003a70;
   border-color: #003a70;
@@ -2206,12 +2229,7 @@ h1 {
   box-shadow: 0 0 0 3px rgba(0,58,112,0.2);
 }
 
-/* Muted speaker */
-.cp-vicon-btn.cp-muted {
-  color: #7a8fa0;
-  border-color: #e2e8f0;
-  background: #f8fafc;
-}
+/* (speaker-muted class retained for future use) */
 
 /* Two-way active */
 .cp-vicon-btn.cp-active-blue {

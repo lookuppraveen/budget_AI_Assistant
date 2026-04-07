@@ -128,9 +128,9 @@ export default function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sttSupported, setSttSupported] = useState(false);
   const [ttsSupported, setTtsSupported] = useState(false);
-  const [aiVoiceEnabled, setAiVoiceEnabled] = useState(true);
+  const [aiVoiceEnabled, setAiVoiceEnabled] = useState(false);
   const [twoWayMode, setTwoWayMode] = useState(false);
-  const [voiceStatus, setVoiceStatus] = useState("Voice assistant ready.");
+  const [voiceStatus, setVoiceStatus] = useState("Text chat active. Use icons below for voice.");
 
   const [isSending, setIsSending] = useState(false);
 
@@ -156,7 +156,7 @@ export default function App() {
   const clearSession = () => {
     setSessionUser(null);
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    setActivePanel("dashboard");
+    setActivePanel("chat");
   };
 
   const allowedNavItems = useMemo(() => {
@@ -662,9 +662,10 @@ export default function App() {
           "I was unable to generate a response from saved history. Please try again."
       };
 
-      speakAssistantReply(assistantReply.text, () => {
-        setMessages((previous) => [...previous, assistantReply]);
-      });
+      // Show text immediately on screen, then start voice at the same time.
+      // Voice + text response: both happen simultaneously — text appears as voice begins.
+      setMessages((previous) => [...previous, assistantReply]);
+      speakAssistantReply(assistantReply.text);
     } catch (error) {
       if (error?.name === "AbortError") {
         return;
@@ -714,29 +715,41 @@ export default function App() {
     setVoiceStatus("Stopped.");
   };
 
+  // Mic-only mode: voice input → text response only. Disables voice output.
   const startListening = () => {
     shouldAutoListenRef.current = false;
+    setAiVoiceEnabled(false);
+    aiVoiceEnabledRef.current = false;
     safeStartListening();
   };
 
+  // Voice + Text mode: enables voice output AND starts listening.
+  // Turning it off reverts to text-only. Not continuous — user must click Mic or this button again to speak.
   const toggleTwoWayMode = () => {
     const nextValue = !twoWayModeRef.current;
     setTwoWayMode(nextValue);
-    setAiVoiceEnabled(true);
-    aiVoiceEnabledRef.current = true;
-    shouldAutoListenRef.current = nextValue;
+    setAiVoiceEnabled(nextValue);
+    aiVoiceEnabledRef.current = nextValue;
+    shouldAutoListenRef.current = false; // not a continuous loop
 
     if (nextValue) {
-      setVoiceStatus("Two-way mode enabled. Ask your budget question by voice.");
+      setVoiceStatus("Voice + Text mode on. Speak or type your question.");
       safeStartListening();
       return;
     }
 
+    // Turning off: stop listening and any playing audio
+    shouldAutoListenRef.current = false;
     if (recognitionRef.current && isListeningRef.current) {
       recognitionRef.current.stop();
     }
-
-    setVoiceStatus("Two-way mode disabled.");
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    window.speechSynthesis?.cancel();
+    setIsSpeaking(false);
+    setVoiceStatus("Text chat active.");
   };
 
   const toggleAiVoice = () => {

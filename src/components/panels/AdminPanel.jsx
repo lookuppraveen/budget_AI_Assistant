@@ -531,6 +531,27 @@ export default function AdminPanel({ authToken }) {
     setEditingMasterTypeName(masterType || "");
   }, [masterType]);
 
+  // Refresh documents list whenever the documents tab becomes active
+  // (the panel is never unmounted, so initial load may be stale if files were uploaded elsewhere)
+  useEffect(() => {
+    if (activeTab !== "documents" || !authToken) return;
+    getDocuments(authToken)
+      .then(({ documents: docs }) => {
+        const mapped = (docs || []).map((document) => ({
+          id: document.id,
+          title: document.title,
+          department: document.department,
+          departmentCode: document.department_code,
+          domain: document.domain,
+          source: document.source_type,
+          submittedBy: document.submitted_by_name,
+          status: document.status
+        }));
+        setDocuments(mapped);
+      })
+      .catch(() => {});
+  }, [activeTab, authToken]);
+
   useEffect(() => {
     if (!activeAgent?.steps?.length) {
       return;

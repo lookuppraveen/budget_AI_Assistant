@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:stlcc.edu)",
+      "WebFetch(domain:seligoai.com)",
+      "WebSearch"
+    ]
+  }
+}

@@ -2,6 +2,7 @@
 import Header from "./components/layout/Header.jsx";
 import Sidebar from "./components/layout/Sidebar.jsx";
 import AuthPage from "./components/auth/AuthPage.jsx";
+import HomePage from "./components/HomePage.jsx";
 import DashboardPanel from "./components/panels/DashboardPanel.jsx";
 import ReportsPanel from "./components/panels/ReportsPanel.jsx";
 import ChatPanel from "./components/panels/ChatPanel.jsx";
@@ -120,6 +121,10 @@ export default function App() {
     return null;
   });
 
+  // Show homepage (marketing) by default; switch to auth form when user clicks Login.
+  // If there's a password-reset token in the URL, skip straight to the auth form.
+  const [showAuth, setShowAuth] = useState(Boolean(RESET_TOKEN));
+
   const [activePanel, setActivePanel] = useState("chat");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState(initialMessages);
@@ -157,6 +162,7 @@ export default function App() {
     setSessionUser(null);
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
     setActivePanel("chat");
+    setShowAuth(false); // Return to homepage after logout
   };
 
   const allowedNavItems = useMemo(() => {
@@ -815,6 +821,11 @@ export default function App() {
   };
 
   if (!sessionUser) {
+    // Show the marketing homepage first; Login button flips showAuth → AuthPage
+    if (!showAuth) {
+      return <HomePage onGoToLogin={() => setShowAuth(true)} />;
+    }
+
     return (
       <>
         <div className="orb orb-a" />
@@ -822,7 +833,6 @@ export default function App() {
         <AuthPage
           onLogin={handleLogin}
           onSignup={handleSignup}
-          onForgot={handleForgot}
           onReset={handleReset}
           resetToken={RESET_TOKEN}
         />

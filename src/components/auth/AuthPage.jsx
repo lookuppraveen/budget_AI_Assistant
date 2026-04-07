@@ -7,38 +7,10 @@ const departmentOptions = [
   { name: "Student Services", code: "STD" }
 ];
 
-const BENEFITS = [
-  {
-    icon: "🤖",
-    title: "AI-Powered Budget Insights",
-    desc: "Ask budget questions in plain English and get instant, policy-grounded answers from your documents and historical data."
-  },
-  {
-    icon: "🔐",
-    title: "Secure Role-Based Access",
-    desc: "Every team member sees only what they need. Admins, analysts, editors, and viewers each get a tailored workspace."
-  },
-  {
-    icon: "📊",
-    title: "Intelligent Report Generation",
-    desc: "Generate professional budget reports and summaries in Word or PDF format with AI-assisted content and formatting."
-  },
-  {
-    icon: "🎙️",
-    title: "Voice-Enabled Conversations",
-    desc: "Use natural voice input to ask questions and hear responses — hands-free budget assistance, anytime."
-  },
-  {
-    icon: "📋",
-    title: "Audit-Ready Governance",
-    desc: "Every AI interaction is logged with source citations, providing a complete, defensible audit trail."
-  }
-];
-
-export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetToken }) {
+export default function AuthPage({ onLogin, onSignup, onReset, resetToken }) {
   const [mode, setMode] = useState(resetToken ? "reset" : "login");
   const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("error"); // "error" | "success"
+  const [messageType, setMessageType] = useState("error");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [loginForm, setLoginForm] = useState({
@@ -53,7 +25,6 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
     departmentCode: "BUD"
   });
 
-  const [forgotEmail, setForgotEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
@@ -62,70 +33,42 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
     setMessageType(type);
   };
 
-  const submitLogin = async (event) => {
-    event.preventDefault();
+  const submitLogin = async (e) => {
+    e.preventDefault();
     setIsSubmitting(true);
     try {
       const result = await onLogin(loginForm);
-      if (!result.ok) {
-        showMsg(result.message);
-        return;
-      }
-      setMessage("");
+      if (!result.ok) showMsg(result.message);
+      else setMessage("");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const submitSignup = async (event) => {
-    event.preventDefault();
+  const submitSignup = async (e) => {
+    e.preventDefault();
     setIsSubmitting(true);
     try {
       const result = await onSignup(signupForm);
-      if (!result.ok) {
-        showMsg(result.message);
-        return;
-      }
-      showMsg("Account created. You can now log in.", "success");
+      if (!result.ok) { showMsg(result.message); return; }
+      showMsg("Account created. You can now sign in.", "success");
       setMode("login");
-      setLoginForm((prev) => ({ ...prev, email: signupForm.email, password: signupForm.password }));
+      setLoginForm((p) => ({ ...p, email: signupForm.email, password: signupForm.password }));
       setSignupForm({ name: "", email: "", password: "", departmentCode: "BUD" });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const submitForgot = async (event) => {
-    event.preventDefault();
-    if (!forgotEmail.trim()) {
-      showMsg("Enter your email to receive reset instructions.");
-      return;
-    }
-    setIsSubmitting(true);
-    try {
-      const result = await onForgot({ email: forgotEmail.trim() });
-      showMsg(result.message || `Reset instructions sent to ${forgotEmail}.`, "success");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const submitReset = async (event) => {
-    event.preventDefault();
-    if (newPassword !== confirmPassword) {
-      showMsg("Passwords do not match.");
-      return;
-    }
+  const submitReset = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) { showMsg("Passwords do not match."); return; }
     setIsSubmitting(true);
     try {
       const result = await onReset({ token: resetToken, password: newPassword });
-      if (!result.ok) {
-        showMsg(result.message);
-        return;
-      }
-      showMsg("Password reset successfully. You can now log in.", "success");
-      setNewPassword("");
-      setConfirmPassword("");
+      if (!result.ok) { showMsg(result.message); return; }
+      showMsg("Password reset successfully. You can now sign in.", "success");
+      setNewPassword(""); setConfirmPassword("");
       setMode("login");
     } finally {
       setIsSubmitting(false);
@@ -134,64 +77,72 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
 
   return (
     <main className="auth-shell">
-      {/* ── Left panel ── */}
+
+      {/* ── Left branding panel ─────────────────────────────────────── */}
       <section className="auth-left">
-        <div className="auth-brand">
-          <div className="auth-brand-icon">💼</div>
-          <div>
-            <p className="auth-brand-org">STLCC Budget Office</p>
-            <h1 className="auth-brand-title">Budget AI Assistant</h1>
-          </div>
+        <div className="auth-left-content">
+          {/* Logo */}
+          <img
+            src="/stlcc-logo-secondary.webp"
+            alt="St. Louis Community College"
+            className="auth-left-logo"
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
+
+          <div className="auth-left-divider" />
+
+          <p className="auth-left-eyebrow">AI Operating Center</p>
+          <h1 className="auth-left-title">Budget Assistant</h1>
+          <p className="auth-left-tagline">
+            Intelligent, policy-grounded budget management for St.&nbsp;Louis Community College.
+          </p>
+
+          {/* Key capability pills */}
+          <ul className="auth-left-pills">
+            <li>AI-Powered Budget Q&amp;A</li>
+            <li>Voice-Enabled Conversations</li>
+            <li>Intelligent Report Generation</li>
+            <li>Audit-Ready Source Citations</li>
+            <li>Secure Role-Based Access</li>
+          </ul>
         </div>
 
-        <p className="auth-tagline">
-          Your intelligent platform for budget management, policy guidance, and governance — all in one place.
-        </p>
-
-        <div className="auth-benefits">
-          {BENEFITS.map((b) => (
-            <div key={b.title} className="auth-benefit-card">
-              <span className="auth-benefit-icon">{b.icon}</span>
-              <div>
-                <p className="auth-benefit-title">{b.title}</p>
-                <p className="auth-benefit-desc">{b.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <p className="auth-footer-note">
-          Powered by OpenAI &nbsp;·&nbsp; Built for STLCC
+        <p className="auth-left-footer">
+          St.&nbsp;Louis Community College &nbsp;·&nbsp; AI Operating Center
         </p>
       </section>
 
-      {/* ── Right panel (auth card) ── */}
+      {/* ── Right auth card ─────────────────────────────────────────── */}
       <section className="auth-card">
         <div className="auth-card-header">
           <h2 className="auth-card-title">
             {mode === "login" && "Welcome back"}
             {mode === "signup" && "Create an account"}
-            {mode === "forgot" && "Reset your password"}
             {mode === "reset" && "Set new password"}
           </h2>
           <p className="auth-card-sub">
-            {mode === "login" && "Sign in to access your dashboard"}
-            {mode === "signup" && "Get started — access is granted by an admin"}
-            {mode === "forgot" && "We'll send you a reset link"}
+            {mode === "login" && "Sign in to your STLCC Budget Assistant"}
+            {mode === "signup" && "Register to request access"}
             {mode === "reset" && "Choose a strong new password"}
           </p>
         </div>
 
+        {/* Tabs — only Login & Register */}
         {!resetToken && (
           <div className="auth-tabs" role="tablist">
-            <button type="button" className={`tab-btn ${mode === "login" ? "active" : ""}`} onClick={() => { setMode("login"); setMessage(""); }}>
+            <button
+              type="button"
+              className={`tab-btn ${mode === "login" ? "active" : ""}`}
+              onClick={() => { setMode("login"); setMessage(""); }}
+            >
               Sign In
             </button>
-            <button type="button" className={`tab-btn ${mode === "signup" ? "active" : ""}`} onClick={() => { setMode("signup"); setMessage(""); }}>
+            <button
+              type="button"
+              className={`tab-btn ${mode === "signup" ? "active" : ""}`}
+              onClick={() => { setMode("signup"); setMessage(""); }}
+            >
               Register
-            </button>
-            <button type="button" className={`tab-btn ${mode === "forgot" ? "active" : ""}`} onClick={() => { setMode("forgot"); setMessage(""); }}>
-              Forgot Password
             </button>
           </div>
         )}
@@ -202,7 +153,7 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
           </p>
         )}
 
-        {/* ── Login ── */}
+        {/* ── Sign In form ── */}
         {mode === "login" && (
           <form className="auth-form" onSubmit={submitLogin}>
             <label className="field">
@@ -233,7 +184,7 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
           </form>
         )}
 
-        {/* ── Signup ── */}
+        {/* ── Register form ── */}
         {mode === "signup" && (
           <form className="auth-form" onSubmit={submitSignup}>
             <label className="field">
@@ -276,45 +227,21 @@ export default function AuthPage({ onLogin, onSignup, onForgot, onReset, resetTo
                 onChange={(e) => setSignupForm((p) => ({ ...p, departmentCode: e.target.value }))}
               >
                 {departmentOptions.map((d) => (
-                  <option key={d.code} value={d.code}>
-                    {d.name} ({d.code})
-                  </option>
+                  <option key={d.code} value={d.code}>{d.name} ({d.code})</option>
                 ))}
               </select>
             </label>
-
             <div className="auth-role-notice">
               <span className="auth-role-notice-icon">ℹ️</span>
-              <span>New accounts start with <strong>Read Only</strong> access. An admin can update your permissions after registration.</span>
+              <span>New accounts start with <strong>Read Only</strong> access. An administrator will assign your role after review.</span>
             </div>
-
             <button type="submit" className="action-btn auth-submit" disabled={isSubmitting}>
               {isSubmitting ? "Creating account…" : "Create Account"}
             </button>
           </form>
         )}
 
-        {/* ── Forgot password ── */}
-        {mode === "forgot" && (
-          <form className="auth-form" onSubmit={submitForgot}>
-            <label className="field">
-              <span>Registered email</span>
-              <input
-                type="email"
-                value={forgotEmail}
-                onChange={(e) => setForgotEmail(e.target.value)}
-                placeholder="you@stlcc.edu"
-                required
-                autoComplete="email"
-              />
-            </label>
-            <button type="submit" className="action-btn auth-submit" disabled={isSubmitting}>
-              {isSubmitting ? "Sending…" : "Send Reset Link"}
-            </button>
-          </form>
-        )}
-
-        {/* ── Reset password ── */}
+        {/* ── Reset password (URL token flow only) ── */}
         {mode === "reset" && (
           <form className="auth-form" onSubmit={submitReset}>
             <p className="auth-reset-hint">

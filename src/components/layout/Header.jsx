@@ -10,7 +10,6 @@
       </div>
 
       <div className="header-right">
-        <div className="status-pill">Phase 1: Trusted Knowledge Agent</div>
         {user && (
           <div className="user-pill">
             <span>{user.name} | {user.role}</span>

@@ -23,3 +23,14 @@ export async function syncEmail(token, allowedTypes = []) {
     }
   });
 }
+
+export async function getResponderStatus(token) {
+  return requestApi("/email/responder/status", { token });
+}
+
+export async function runResponderNow(token) {
+  return requestApi("/email/responder/run", {
+    token,
+    options: { method: "POST" }
+  });
+}

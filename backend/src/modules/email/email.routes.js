@@ -5,6 +5,7 @@ import { validate } from "../../middleware/validate.js";
 import { asyncHandler } from "../../utils/async-handler.js";
 import { testEmailSchema, getEmailConfigSchema } from "./email.schemas.js";
 import { getEmailConfig, testAndSaveEmailConfig, syncEmails } from "./email.service.js";
+import { runEmailResponderCycle, getResponderStatus } from "./email-responder.service.js";
 import { logAudit } from "../../utils/audit.js";
 
 const emailRouter = Router();
@@ -86,6 +87,45 @@ emailRouter.post(
     const allowedTypes = Array.isArray(req.body?.allowedTypes) ? req.body.allowedTypes : [];
     const stats = await syncEmails(allowedTypes, req.user.departmentId || null, req.user.id || null);
     logAudit(req, "email.sync", "email_integration", null, { synced: stats.synced, attachments: stats.attachments, allowedTypes });
+    res.status(200).json({ stats });
+  })
+);
+
+/**
+ * @swagger
+ * /email/responder/status:
+ *   get:
+ *     tags: [Email]
+ *     summary: Get email responder status and recent processed emails
+ *     responses:
+ *       200: { description: Responder counts and recent activity }
+ */
+emailRouter.get(
+  "/responder/status",
+  authenticate,
+  authorize("Admin"),
+  asyncHandler(async (_req, res) => {
+    const status = await getResponderStatus();
+    res.status(200).json(status);
+  })
+);
+
+/**
+ * @swagger
+ * /email/responder/run:
+ *   post:
+ *     tags: [Email]
+ *     summary: Manually trigger one email responder poll cycle
+ *     responses:
+ *       200: { description: Cycle stats — processed, replied, skipped counts }
+ */
+emailRouter.post(
+  "/responder/run",
+  authenticate,
+  authorize("Admin"),
+  asyncHandler(async (req, res) => {
+    const stats = await runEmailResponderCycle();
+    logAudit(req, "email.responder.run", "email_inbox_queries", null, stats);
     res.status(200).json({ stats });
   })
 );

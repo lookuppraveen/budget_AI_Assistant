@@ -171,23 +171,6 @@ export default function HomePage({ onGoToLogin }) {
 
           {/* ③ Sub-text removed per request */}
 
-          <div className="hp-hero-stats">
-            <div className="hp-hero-stat">
-              <span className="hp-hero-stat-num">6</span>
-              <span className="hp-hero-stat-label">Core Modules</span>
-            </div>
-            <div className="hp-hero-stat-divider" aria-hidden="true" />
-            <div className="hp-hero-stat">
-              <span className="hp-hero-stat-num">4</span>
-              <span className="hp-hero-stat-label">Role Tiers</span>
-            </div>
-            <div className="hp-hero-stat-divider" aria-hidden="true" />
-            <div className="hp-hero-stat">
-              <span className="hp-hero-stat-num">100%</span>
-              <span className="hp-hero-stat-label">Source-Grounded</span>
-            </div>
-          </div>
-
           <div className="hp-hero-cta">
             <button type="button" className="hp-btn-primary" onClick={onGoToLogin}>
               Login to Get Started

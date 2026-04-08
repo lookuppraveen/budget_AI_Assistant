@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getEmailConfig, syncEmail, testEmailConnection } from "../../services/emailApi.js";
+import { getEmailConfig, syncEmail, testEmailConnection, getResponderStatus, runResponderNow } from "../../services/emailApi.js";
 
 const providerMeta = {
   gmail: {
@@ -49,6 +49,13 @@ export default function EmailPanel({ authToken }) {
   const [syncing, setSyncing] = useState(false);
   const [connectedDetails, setConnectedDetails] = useState(null);
 
+  // Email Responder state
+  const [responderCounts, setResponderCounts] = useState({ total: 0, replied: 0, failed: 0, skipped: 0, pending: 0 });
+  const [responderRecent, setResponderRecent] = useState([]);
+  const [responderLastReplied, setResponderLastReplied] = useState(null);
+  const [runningCycle, setRunningCycle] = useState(false);
+  const [cycleResult, setCycleResult] = useState(null);
+
   const currentProvider = useMemo(() => providerMeta[provider], [provider]);
 
   function buildConnectedDetails(p, fields) {
@@ -92,6 +99,21 @@ export default function EmailPanel({ authToken }) {
         if (isConnected) {
           setConnectedDetails(buildConnectedDetails(config.provider, filled));
         }
+      })
+      .catch(() => {});
+
+    getResponderStatus(authToken)
+      .then((data) => {
+        const c = data.counts || {};
+        setResponderCounts({
+          total:   Number(c.total   || 0),
+          replied: Number(c.replied || 0),
+          failed:  Number(c.failed  || 0),
+          skipped: Number(c.skipped || 0),
+          pending: Number(c.pending || 0)
+        });
+        setResponderLastReplied(c.last_replied_at || null);
+        setResponderRecent(data.recent || []);
       })
       .catch(() => {});
   }, [authToken]);
@@ -150,6 +172,32 @@ export default function EmailPanel({ authToken }) {
       setConnectionStatus(`Sync failed: ${error.message}`);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleRunCycle = async () => {
+    if (!authToken) return;
+    setRunningCycle(true);
+    setCycleResult(null);
+    try {
+      const result = await runResponderNow(authToken);
+      setCycleResult(result.stats);
+      // Refresh counts
+      const statusData = await getResponderStatus(authToken);
+      const c = statusData.counts || {};
+      setResponderCounts({
+        total:   Number(c.total   || 0),
+        replied: Number(c.replied || 0),
+        failed:  Number(c.failed  || 0),
+        skipped: Number(c.skipped || 0),
+        pending: Number(c.pending || 0)
+      });
+      setResponderLastReplied(c.last_replied_at || null);
+      setResponderRecent(statusData.recent || []);
+    } catch (error) {
+      setCycleResult({ error: error.message });
+    } finally {
+      setRunningCycle(false);
     }
   };
 
@@ -287,6 +335,131 @@ export default function EmailPanel({ authToken }) {
             <strong>{storeAttachments ? "Enabled" : "Disabled"}</strong>
           </div>
         </div>
+      </section>
+
+      {/* ── Email Responder ───────────────────────────────────────────────── */}
+      <section className="setup-card">
+        <h3>Email Responder</h3>
+        <p style={{ marginBottom: "1rem", opacity: 0.8, lineHeight: 1.6 }}>
+          Users can email <strong>budgetassistant@stlcc.edu</strong> and the Budget Agent
+          will automatically reply with an AI-generated answer — the same response it gives
+          via chat or voice. The inbox is polled every 5 minutes when the responder is active.
+        </p>
+
+        <div className="metric-strip" style={{ marginBottom: "1.25rem" }}>
+          <div>
+            <p>Total Received</p>
+            <strong>{responderCounts.total}</strong>
+          </div>
+          <div>
+            <p>Replied</p>
+            <strong style={{ color: "var(--accent, #22c55e)" }}>{responderCounts.replied}</strong>
+          </div>
+          <div>
+            <p>Pending</p>
+            <strong style={{ color: responderCounts.pending > 0 ? "#f59e0b" : undefined }}>{responderCounts.pending}</strong>
+          </div>
+          <div>
+            <p>Failed</p>
+            <strong style={{ color: responderCounts.failed > 0 ? "#ef4444" : undefined }}>{responderCounts.failed}</strong>
+          </div>
+          <div>
+            <p>Skipped</p>
+            <strong>{responderCounts.skipped}</strong>
+          </div>
+          {responderLastReplied && (
+            <div>
+              <p>Last Reply Sent</p>
+              <strong style={{ fontSize: "0.85em" }}>{new Date(responderLastReplied).toLocaleString()}</strong>
+            </div>
+          )}
+        </div>
+
+        <div className="inline-actions" style={{ marginBottom: "1.25rem" }}>
+          <button
+            type="button"
+            className="action-btn"
+            onClick={handleRunCycle}
+            disabled={runningCycle || !statusOk}
+            title={!statusOk ? "Connect a mailbox first" : "Poll inbox now"}
+          >
+            {runningCycle ? "Checking inbox..." : "Check Inbox Now"}
+          </button>
+          {cycleResult && !cycleResult.error && (
+            <p className="status-line" style={{ color: "var(--accent, #22c55e)" }}>
+              Cycle done — processed: {cycleResult.processed}, replied: {cycleResult.replied}, skipped: {cycleResult.skipped}
+            </p>
+          )}
+          {cycleResult?.error && (
+            <p className="status-line" style={{ color: "#ef4444" }}>
+              Error: {cycleResult.error}
+            </p>
+          )}
+        </div>
+
+        {responderRecent.length > 0 && (
+          <>
+            <p className="section-caption" style={{ marginBottom: "0.5rem" }}>Recent inbound emails</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {responderRecent.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    padding: "0.75rem 1rem",
+                    borderRadius: "0.375rem",
+                    background: "var(--surface-2, rgba(255,255,255,0.04))",
+                    border: "1px solid var(--border, rgba(255,255,255,0.1))",
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto",
+                    gap: "0.25rem 1rem",
+                    alignItems: "start"
+                  }}
+                >
+                  <div>
+                    <p style={{ fontWeight: 600, marginBottom: "0.15rem", fontSize: "0.9em" }}>
+                      {item.sender_email}
+                      {item.sender_name && item.sender_name !== item.sender_email
+                        ? ` (${item.sender_name})`
+                        : ""}
+                    </p>
+                    <p style={{ opacity: 0.65, fontSize: "0.82em" }}>{item.subject || "(no subject)"}</p>
+                    {item.error_message && (
+                      <p style={{ color: "#ef4444", fontSize: "0.8em", marginTop: "0.2rem" }}>{item.error_message}</p>
+                    )}
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        padding: "0.15rem 0.6rem",
+                        borderRadius: "9999px",
+                        fontSize: "0.75em",
+                        fontWeight: 600,
+                        background:
+                          item.status === "replied" ? "rgba(34,197,94,0.15)" :
+                          item.status === "failed"  ? "rgba(239,68,68,0.15)"  :
+                          item.status === "pending" ? "rgba(245,158,11,0.15)" :
+                          "rgba(255,255,255,0.08)",
+                        color:
+                          item.status === "replied" ? "#22c55e" :
+                          item.status === "failed"  ? "#ef4444"  :
+                          item.status === "pending" ? "#f59e0b" :
+                          "inherit"
+                      }}
+                    >
+                      {item.status}
+                    </span>
+                    {item.replied_at && (
+                      <p style={{ opacity: 0.5, fontSize: "0.75em", marginTop: "0.2rem" }}>
+                        {new Date(item.replied_at).toLocaleTimeString()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </section>
     </article>
   );

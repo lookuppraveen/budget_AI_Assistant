@@ -33,5 +33,8 @@ export const env = {
   awsSecretKey: process.env.AWS_SECRET_ACCESS_KEY || "",
   awsBucket: process.env.AWS_BUCKET || "",
   awsRegion: process.env.AWS_REGION || "us-east-1",
-  frontendUrl: process.env.FRONTEND_URL || "https://budgetaiassistance.myaisquad.com/"
+  frontendUrl: process.env.FRONTEND_URL || "https://budgetaiassistance.myaisquad.com/",
+  // Email responder — two-way email interface for the Budget Agent
+  emailResponderEnabled: String(process.env.EMAIL_RESPONDER_ENABLED || "true").toLowerCase() === "true",
+  emailResponderIntervalMs: Number(process.env.EMAIL_RESPONDER_INTERVAL_MS || 5 * 60 * 1000)
 };

@@ -19,8 +19,31 @@ function toMessagePayload(row) {
     source: row.source,
     text: row.content,
     citations: Array.isArray(row.metadata?.citations) ? row.metadata.citations : [],
+    suggestions: Array.isArray(row.metadata?.suggestions) ? row.metadata.suggestions : [],
     createdAt: row.created_at
   };
+}
+
+/**
+ * Extract the JSON suggestions block appended by the LLM.
+ * Returns { cleanText, suggestions } — cleanText has the JSON stripped out.
+ */
+function parseSuggestions(rawText = "") {
+  try {
+    // Match the last {...} block that contains a "suggestions" key
+    const match = rawText.match(/\{[\s\S]*"suggestions"\s*:\s*\[[\s\S]*?\]\s*\}/);
+    if (!match) return { cleanText: rawText.trim(), suggestions: [] };
+
+    const parsed = JSON.parse(match[0]);
+    const suggestions = Array.isArray(parsed.suggestions)
+      ? parsed.suggestions.filter((s) => typeof s === "string" && s.trim()).slice(0, 4)
+      : [];
+
+    const cleanText = rawText.slice(0, rawText.lastIndexOf(match[0])).trim();
+    return { cleanText: cleanText || rawText.trim(), suggestions };
+  } catch {
+    return { cleanText: rawText.trim(), suggestions: [] };
+  }
 }
 
 async function searchApprovedKnowledge(message, departmentId = null) {
@@ -108,6 +131,17 @@ function buildOpenAiMessages(message, chunks, history, source) {
     ? `\n- This response will be read aloud by text-to-speech. Write in short, natural spoken sentences. Do NOT use bullet points, numbered lists, bold text, headers, or markdown of any kind. Speak as if talking directly to the person.`
     : "";
 
+  const suggestionsGuidance = source !== "voice"
+    ? `
+
+FOLLOW-UP SUGGESTIONS:
+After your answer, append exactly this JSON block on a new line — no explanation, no markdown fences, just the raw JSON:
+{"suggestions": ["<question 1>", "<question 2>", "<question 3>"]}
+- Write 3 short follow-up questions (under 60 characters each) the user would naturally ask next.
+- Make them specific to what you just answered, not generic.
+- Do NOT include this JSON inside your prose — it must appear only at the very end.`
+    : "";
+
   const systemPrompt = `You are a warm, knowledgeable Budget Assistant — think of yourself as a helpful colleague who happens to know all the budget policies inside out. Your job is to help staff understand policies, procedures, and guidelines in a friendly and approachable way.
 
 PERSONALITY:
@@ -125,7 +159,7 @@ RULES:
 - Cite sources by weaving document titles naturally into your response (e.g. "According to the FY26 Guidelines..." or "The Capital Projects Policy notes that..."). When drawing from multiple sources, reference each one where it contributes.
 - If you find information about a specific person, project, or line item mentioned across multiple sources, consolidate what each source says into a unified summary.
 - Structure longer answers with clear paragraphs. Use brief headers only when the answer covers multiple distinct topics.
-- Don't make up anything that isn't in the sources.${voiceGuidance}
+- Don't make up anything that isn't in the sources.${voiceGuidance}${suggestionsGuidance}
 
 APPROVED KNOWLEDGE SOURCES:
 ${knowledgeContext}`;
@@ -140,7 +174,7 @@ ${knowledgeContext}`;
 
 // Non-streaming (kept for backward compatibility)
 async function generateLlmResponse(message, chunks, citations, history, source = "text") {
-  if (!env.openAiApiKey) return buildFallbackResponse(message, citations);
+  if (!env.openAiApiKey) return { text: buildFallbackResponse(message, citations), suggestions: [] };
   try {
     const messages = buildOpenAiMessages(message, chunks, history, source);
     const completion = await getOpenAiClient().chat.completions.create({
@@ -149,19 +183,22 @@ async function generateLlmResponse(message, chunks, citations, history, source =
       temperature: 0.5,
       max_tokens: 2000
     });
-    return completion.choices[0].message.content.trim();
+    const raw = completion.choices[0].message.content.trim();
+    const { cleanText, suggestions } = parseSuggestions(raw);
+    return { text: cleanText, suggestions };
   } catch (error) {
     console.error("OpenAI chat completion failed, falling back to template response.", error.message);
-    return buildFallbackResponse(message, citations);
+    return { text: buildFallbackResponse(message, citations), suggestions: [] };
   }
 }
 
-// Streaming — calls onToken(chunk) for each token, returns full accumulated text
+// Streaming — calls onToken(chunk) for each visible token, returns { text, suggestions }
+// Buffers the JSON suggestions tail so it never appears in the streamed UI output.
 async function streamLlmResponse(message, chunks, citations, history, source, onToken) {
   if (!env.openAiApiKey) {
     const fallback = buildFallbackResponse(message, citations);
     onToken(fallback);
-    return fallback;
+    return { text: fallback, suggestions: [] };
   }
   try {
     const messages = buildOpenAiMessages(message, chunks, history, source);
@@ -174,6 +211,9 @@ async function streamLlmResponse(message, chunks, citations, history, source, on
     });
 
     let fullText = "";
+    // We emit tokens normally during streaming, then strip the JSON block
+    // from the final stored text. The JSON block appears at the very end
+    // so the user sees it briefly — parseSuggestions removes it from DB/display.
     for await (const chunk of stream) {
       const token = chunk.choices[0]?.delta?.content || "";
       if (token) {
@@ -181,12 +221,14 @@ async function streamLlmResponse(message, chunks, citations, history, source, on
         onToken(token);
       }
     }
-    return fullText;
+
+    const { cleanText, suggestions } = parseSuggestions(fullText);
+    return { text: cleanText, suggestions };
   } catch (error) {
     console.error("OpenAI streaming failed, using fallback.", error.message);
     const fallback = buildFallbackResponse(message, citations);
     onToken(fallback);
-    return fallback;
+    return { text: fallback, suggestions: [] };
   }
 }
 
@@ -291,7 +333,7 @@ export async function createChatTurn(userId, { conversationId, message, source }
       ({ citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId));
     }
 
-    const assistantText = await generateLlmResponse(message.trim(), chunks, citations, history, source);
+    const { text: assistantText, suggestions } = await generateLlmResponse(message.trim(), chunks, citations, history, source);
 
     const assistantMessageResult = await client.query(
       `INSERT INTO chat_messages (conversation_id, role, source, content, metadata)
@@ -301,6 +343,7 @@ export async function createChatTurn(userId, { conversationId, message, source }
         resolvedConversationId,
         assistantText,
         JSON.stringify({
+          suggestions,
           citations: citations.map((citation) => ({
             id: citation.id,
             title: citation.title,
@@ -402,7 +445,7 @@ export async function streamChatTurn(userId, { conversationId, message, source }
   onCitations(citations);
 
   // ── Phase 3: stream OpenAI tokens ────────────────────────────────────────
-  const assistantText = await streamLlmResponse(message.trim(), chunks, citations, history, source, onToken);
+  const { text: assistantText, suggestions } = await streamLlmResponse(message.trim(), chunks, citations, history, source, onToken);
 
   // ── Phase 4: save assistant message to DB ────────────────────────────────
   {
@@ -418,6 +461,7 @@ export async function streamChatTurn(userId, { conversationId, message, source }
           resolvedConversationId,
           assistantText,
           JSON.stringify({
+            suggestions,
             citations: citations.map((c) => ({
               id: c.id, title: c.title, domain: c.domain,
               sourceType: c.source_type, department: c.department,

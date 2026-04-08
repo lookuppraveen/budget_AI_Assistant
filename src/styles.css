@@ -2072,6 +2072,45 @@ h1 {
   font-style: italic;
 }
 
+/* ── Follow-up suggestion chips ─────────────────────────────────────────────── */
+.cp-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cp-suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid #c2d8ef;
+  background: #f0f7ff;
+  color: #0068a8;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.cp-suggestion-chip:hover:not(:disabled) {
+  background: #daeeff;
+  border-color: #0183c9;
+  color: #004f80;
+}
+
+.cp-suggestion-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Stop / Clear action bar */
 .cp-action-bar {
   display: flex;

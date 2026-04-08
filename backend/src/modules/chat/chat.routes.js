@@ -185,7 +185,13 @@ chatRouter.post(
       departmentId,
       (citations) => { if (!aborted) send({ type: "citations", citations }); },
       (token)     => { if (!aborted) send({ type: "token", token }); },
-      (result)    => { if (!aborted) send({ type: "done", ...result }); }
+      (result)    => {
+        if (!aborted) {
+          const suggestions = result.assistantMessage?.suggestions || [];
+          send({ type: "done", ...result });
+          if (suggestions.length) send({ type: "suggestions", suggestions });
+        }
+      }
     )
       .catch((err) => {
         console.error("streamChatTurn error:", err.message);

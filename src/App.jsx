@@ -317,6 +317,7 @@ export default function App() {
             history.messages.map((message) => ({
               role: message.role,
               text: message.text,
+              suggestions: message.suggestions || [],
               source: message.source,
               citations: message.citations || []
             }))
@@ -708,18 +709,20 @@ export default function App() {
           } else if (data.type === "done") {
             receivedDone = true;
             if (data.conversation?.id) setConversationId(data.conversation.id);
-            // Replace placeholder with the persisted message (has DB id etc.)
+            // Use the DB-stored text (JSON block already stripped) as the final text
+            const cleanedText = data.assistantMessage?.text || fullText;
             const finalMsg = {
               ...(data.assistantMessage || {}),
               role: "assistant",
-              text: fullText || data.assistantMessage?.text || "",
+              text: cleanedText,
               citations: data.assistantMessage?.citations || [],
+              suggestions: data.assistantMessage?.suggestions || [],
             };
             setMessages((prev) => prev.map((m) =>
               m._streamingKey === streamingKey ? finalMsg : m
             ));
-            // Start voice with the accumulated text
-            speakAssistantReply(fullText);
+            // Speak using the clean text (no JSON suffix)
+            speakAssistantReply(cleanedText);
           } else if (data.type === "error") {
             throw new Error(data.message);
           }
@@ -967,8 +970,13 @@ export default function App() {
                       role: m.role,
                       text: m.text || m.content || "",
                       source: m.source || "text",
-                      citations: m.citations || []
+                      citations: m.citations || [],
+                      suggestions: m.suggestions || []
                     })));
+                  }}
+                  onSuggestionClick={(suggestion) => {
+                    setDraft(suggestion);
+                    sendUserMessage(suggestion, "text");
                   }}
                 />
               )}

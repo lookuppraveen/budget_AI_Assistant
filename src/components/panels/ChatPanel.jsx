@@ -84,6 +84,7 @@ export default function ChatPanel({
   onToggleTwoWayMode,
   onClearChat,
   onLoadConversation,
+  onSuggestionClick,
   isListening,
   isSpeaking,
   isSending,
@@ -181,35 +182,60 @@ export default function ChatPanel({
 
       {/* ── Chat window ────────────────────────────────────────────── */}
       <div className="cp-messages" role="log" aria-live="polite">
-        {messages.map((msg, i) => (
-          <div key={`${msg.role}-${i}`} className={`cp-msg cp-msg-${msg.role}${msg._streamingKey ? " cp-msg-streaming" : ""}`}>
-            <span className="cp-msg-label">{msg.role === "user" ? "You" : "Assistant"}</span>
-            <p className="cp-msg-text">{msg.text}</p>
-            {msg.source === "voice" && (
-              <span className="cp-msg-badge">
-                <IconMic /> Voice
-              </span>
-            )}
-            {msg.role === "assistant" && Array.isArray(msg.citations) && msg.citations.length > 0 && (
-              <div className="cp-citations">
-                <p className="cp-citations-label">Sources</p>
-                <ul>
-                  {msg.citations.map((c) => (
-                    <li key={c.id || c.title}>
-                      <strong>{c.title}</strong>
-                      {c.domain && <span className="cp-cite-tag">{c.domain}</span>}
-                      {c.department && <span className="cp-cite-tag">{c.department}</span>}
-                      {typeof c.score === "number" && (
-                        <span className="cp-cite-score">{c.score.toFixed(2)}</span>
-                      )}
-                      {c.excerpt && <p className="cp-cite-excerpt">{c.excerpt}</p>}
-                    </li>
+        {messages.map((msg, i) => {
+          const isLastAssistant = msg.role === "assistant" && i === messages.length - 1;
+          const showSuggestions =
+            isLastAssistant &&
+            !msg._streamingKey &&
+            msg.source !== "voice" &&
+            Array.isArray(msg.suggestions) &&
+            msg.suggestions.length > 0;
+
+          return (
+            <div key={`${msg.role}-${i}`} className={`cp-msg cp-msg-${msg.role}${msg._streamingKey ? " cp-msg-streaming" : ""}`}>
+              <span className="cp-msg-label">{msg.role === "user" ? "You" : "Assistant"}</span>
+              <p className="cp-msg-text">{msg.text}</p>
+              {msg.source === "voice" && (
+                <span className="cp-msg-badge">
+                  <IconMic /> Voice
+                </span>
+              )}
+              {msg.role === "assistant" && Array.isArray(msg.citations) && msg.citations.length > 0 && (
+                <div className="cp-citations">
+                  <p className="cp-citations-label">Sources</p>
+                  <ul>
+                    {msg.citations.map((c) => (
+                      <li key={c.id || c.title}>
+                        <strong>{c.title}</strong>
+                        {c.domain && <span className="cp-cite-tag">{c.domain}</span>}
+                        {c.department && <span className="cp-cite-tag">{c.department}</span>}
+                        {typeof c.score === "number" && (
+                          <span className="cp-cite-score">{c.score.toFixed(2)}</span>
+                        )}
+                        {c.excerpt && <p className="cp-cite-excerpt">{c.excerpt}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {showSuggestions && (
+                <div className="cp-suggestions">
+                  {msg.suggestions.map((s, si) => (
+                    <button
+                      key={si}
+                      type="button"
+                      className="cp-suggestion-chip"
+                      onClick={() => onSuggestionClick?.(s)}
+                      disabled={isSending}
+                    >
+                      {s}
+                    </button>
                   ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
         <div ref={chatEndRef} />
       </div>
 

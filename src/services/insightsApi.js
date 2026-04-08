@@ -23,6 +23,10 @@ export async function getAuditLogs(token, { limit = 50, offset = 0, action, enti
   return requestApi(`/audit/logs?${params.toString()}`, { token });
 }
 
+export async function getAuditMetricDetail(token, type) {
+  return requestApi(`/audit/metrics/detail?type=${encodeURIComponent(type)}`, { token });
+}
+
 export async function createReport(token, payload) {
   return requestApi("/reports", {
     token,

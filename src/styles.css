@@ -3475,12 +3475,77 @@ h1 {
 .metric-label {
   margin: 0;
   color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .metric-value {
   margin: 8px 0 0;
   font-size: 1.05rem;
   font-weight: 600;
+}
+
+/* ── Clickable metric button ─────────────────────────────────────────────────── */
+.audit-metric-btn {
+  all: unset;
+  display: block;
+  width: 100%;
+  background: #fff;
+  border: 1.5px solid var(--edge);
+  border-radius: 14px;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.audit-metric-btn:hover:not(:disabled) {
+  border-color: #aac8e8;
+  box-shadow: 0 2px 12px rgba(1, 131, 201, 0.1);
+}
+
+.audit-metric-btn:disabled {
+  cursor: default;
+}
+
+.audit-metric-active {
+  border-width: 2px !important;
+}
+
+/* ── Drill-down detail panel ─────────────────────────────────────────────────── */
+.audit-detail-panel {
+  padding: 0.25rem 0;
+}
+
+.audit-detail-header {
+  margin-bottom: 0.5rem;
+}
+
+.audit-detail-title {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.audit-detail-desc {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--ink-soft);
+  line-height: 1.6;
+  max-width: 72ch;
+}
+
+/* ── Entity type legend ──────────────────────────────────────────────────────── */
+.audit-legend {
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  background: #f0f7ff;
+  border: 1px solid #c2d8ef;
+  font-size: 0.8rem;
+  color: #0068a8;
+  line-height: 1.5;
 }
 
 @keyframes drift {

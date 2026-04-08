@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../../middleware/authenticate.js";
 import { asyncHandler } from "../../utils/async-handler.js";
-import { getAuditLogs, getAuditMetrics } from "./audit.service.js";
+import { getAuditLogs, getAuditMetrics, getMetricDetail } from "./audit.service.js";
 
 const auditRouter = Router();
 
@@ -54,6 +54,32 @@ auditRouter.get(
     const { action, entityType } = req.query;
     const result = await getAuditLogs({ limit, offset, action, entityType });
     res.status(200).json(result);
+  })
+);
+
+/**
+ * @swagger
+ * /audit/metrics/detail:
+ *   get:
+ *     tags: [Audit]
+ *     summary: Drill-down data for a specific metric box
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [top-domain, risky-answers, top-source, coverage-gaps, avg-confidence, resolution-rate]
+ *     responses:
+ *       200: { description: Drill-down title, description, columns and rows }
+ */
+auditRouter.get(
+  "/metrics/detail",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { type } = req.query;
+    const detail = await getMetricDetail(type);
+    res.status(200).json({ detail });
   })
 );
 

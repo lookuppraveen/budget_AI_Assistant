@@ -194,7 +194,7 @@ export default function AuditPanel({ authToken }) {
       {metricsLoading ? (
         <p className="section-caption">Loading metrics…</p>
       ) : (
-        <div className="metric-grid">
+        <div className="am-grid">
           {metrics.map((metric) => {
             const isActive = activeMetric === metric.label;
             const color = METRIC_COLOR[metric.label] || "#003a70";
@@ -205,40 +205,19 @@ export default function AuditPanel({ authToken }) {
               <button
                 key={metric.label}
                 type="button"
-                className={`metric audit-metric-btn${isActive ? " audit-metric-active" : ""}`}
+                className={`am-card${isActive ? " am-card-active" : ""}`}
                 onClick={() => handleMetricClick(metric)}
                 disabled={!isClickable}
-                style={{
-                  textAlign: "left",
-                  cursor: isClickable ? "pointer" : "default",
-                  borderColor: isActive ? color : undefined,
-                  boxShadow: isActive ? `0 0 0 2px ${color}33, 0 4px 16px ${color}22` : undefined,
-                  background: isActive ? `linear-gradient(135deg, ${color}0d, ${color}05)` : undefined,
-                  transition: "border-color 0.18s, box-shadow 0.18s, background 0.18s"
-                }}
+                style={{ "--am-color": color }}
               >
-                <p className="metric-label" style={{ color: isActive ? color : undefined }}>
-                  {metric.label}
-                  {isActive && (
-                    <span style={{ marginLeft: "6px", fontSize: "0.7em", opacity: 0.7 }}>▲ hide</span>
-                  )}
-                </p>
-                <p
-                  className="metric-value"
-                  style={{ color: isActive ? color : undefined, fontSize: "1.15rem", marginBottom: "6px" }}
-                >
-                  {metric.value}
-                </p>
-                {hint && !isActive && (
-                  <p style={{ margin: 0, fontSize: "0.7rem", color: "#6b7280", fontWeight: 400 }}>
-                    {hint}
-                  </p>
-                )}
-                {isActive && (
-                  <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 500, color }}>
-                    Showing detail below ↓
-                  </p>
-                )}
+                {/* Colored accent bar on top */}
+                <span className="am-bar" aria-hidden="true" />
+
+                <span className="am-label">{metric.label}</span>
+                <span className="am-value">{metric.value}</span>
+                <span className="am-hint">
+                  {isActive ? "Click to collapse ▲" : hint}
+                </span>
               </button>
             );
           })}
@@ -248,12 +227,8 @@ export default function AuditPanel({ authToken }) {
       {/* ── Drill-down detail panel ────────────────────────────────────────── */}
       {(activeMetric || detailLoading) && (
         <section
-          className="setup-card"
-          style={{
-            marginTop: "1.25rem",
-            borderLeft: `3px solid ${activeColor}`,
-            borderRadius: "0 12px 12px 0"
-          }}
+          className="setup-card am-detail-card"
+          style={{ borderTop: `3px solid ${activeColor}` }}
         >
           <DetailTable detail={detail} loading={detailLoading} />
         </section>

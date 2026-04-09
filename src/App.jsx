@@ -439,14 +439,11 @@ export default function App() {
           accumulatedTranscript += (accumulatedTranscript ? " " : "") + finalQuestion;
           setDraft(accumulatedTranscript);
 
-          // Stop recognition immediately on first final result so the mic
-          // turns off and Chrome stops sending more events. The debounce then
-          // waits a beat before submitting, giving the user a moment to see
-          // their captured text before it sends.
-          if (recognitionRef.current && isListeningRef.current) {
-            recognitionRef.current.stop();
-          }
-
+          // Do NOT stop recognition here. Mobile browsers (Android especially)
+          // split sentences into multiple final results — stopping on the first
+          // one cuts the sentence short. Instead we use a rolling debounce:
+          // each new final result resets the timer; after 1200 ms of silence
+          // we stop recognition and send the fully-accumulated text.
           if (speechDebounceRef.current) {
             clearTimeout(speechDebounceRef.current);
           }
@@ -455,6 +452,13 @@ export default function App() {
             const textToSend = accumulatedTranscript.trim();
             accumulatedTranscript = "";
             speechDebounceRef.current = null;
+
+            // Stop recognition now that we are done accumulating.
+            if (recognitionRef.current && isListeningRef.current) {
+              recognitionRef.current.stop();
+            }
+
+            if (!textToSend) return;
             queueVoiceLog({
               eventType: "user_utterance",
               direction: "user",
@@ -462,7 +466,7 @@ export default function App() {
               status: "captured"
             });
             sendUserMessageRef.current(textToSend, "voice");
-          }, 800);
+          }, 1200);
         }
       };
 
@@ -564,7 +568,19 @@ export default function App() {
     setVoiceStatus("Voice listening paused.");
   };
 
-  // Speak text using browser SpeechSynthesis (no API key needed)
+  // Speak text using browser SpeechSynthesis (no API key needed).
+  // iOS Safari requires the audio session to be "unlocked" via a synchronous
+  // call inside a user-gesture handler before any async speak() call will work.
+  // Call iosUnlockSpeech() in every button-click handler that may trigger TTS.
+  const iosUnlockSpeech = () => {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    // Speak an empty utterance synchronously within the gesture to prime iOS audio.
+    const silent = new SpeechSynthesisUtterance("");
+    silent.volume = 0;
+    synth.speak(silent);
+  };
+
   const speakWithBrowser = (spokenText, onAudioStarted) => {
     const synth = window.speechSynthesis;
     if (!synth) return false;
@@ -575,10 +591,16 @@ export default function App() {
     utterance.rate = 0.93;  // slightly relaxed pace — feels more natural in conversation
     utterance.pitch = 1.08; // very slight lift — warmer, friendlier tone
 
-    // Prefer a natural English voice if available
-    const voices = synth.getVoices();
-    const preferred = voices.find((v) => v.lang.startsWith("en") && v.localService) || voices.find((v) => v.lang.startsWith("en"));
-    if (preferred) utterance.voice = preferred;
+    // Assign voice — voices may not be loaded yet on first page load (iOS/mobile).
+    // Try immediately; if the list is empty, wait for voiceschanged then retry.
+    const assignVoiceAndSpeak = () => {
+      const voices = synth.getVoices();
+      const preferred =
+        voices.find((v) => v.lang.startsWith("en") && v.localService) ||
+        voices.find((v) => v.lang.startsWith("en"));
+      if (preferred) utterance.voice = preferred;
+      synth.speak(utterance);
+    };
 
     utterance.onstart = () => {
       if (onAudioStarted) onAudioStarted();
@@ -596,12 +618,25 @@ export default function App() {
       }
     };
 
-    utterance.onerror = () => {
+    utterance.onerror = (e) => {
+      // "canceled" fires when synth.cancel() is called mid-speech — not a real error
+      if (e.error === "canceled" || e.error === "interrupted") return;
       setIsSpeaking(false);
       if (onAudioStarted) onAudioStarted();
     };
 
-    synth.speak(utterance);
+    const voices = synth.getVoices();
+    if (voices.length > 0) {
+      assignVoiceAndSpeak();
+    } else {
+      // Voices not loaded yet (common on iOS/mobile first load)
+      synth.addEventListener("voiceschanged", assignVoiceAndSpeak, { once: true });
+      // Fallback: if voiceschanged never fires, speak anyway after a short wait
+      window.setTimeout(() => {
+        if (!utterance.voice) synth.speak(utterance);
+      }, 250);
+    }
+
     return true;
   };
 
@@ -848,6 +883,8 @@ export default function App() {
 
   // Mic-only mode: voice input → text response only. Disables voice output.
   const startListening = () => {
+    // Prime iOS audio session synchronously within this user-gesture handler.
+    iosUnlockSpeech();
     shouldAutoListenRef.current = false;
     setAiVoiceEnabled(false);
     aiVoiceEnabledRef.current = false;
@@ -857,6 +894,10 @@ export default function App() {
   // Voice + Text mode: enables voice output AND starts listening.
   // Turning it off reverts to text-only. Not continuous — user must click Mic or this button again to speak.
   const toggleTwoWayMode = () => {
+    // Prime iOS audio session synchronously within this user-gesture handler so
+    // speechSynthesis.speak() works later when the AI response arrives (async).
+    iosUnlockSpeech();
+
     const nextValue = !twoWayModeRef.current;
     setTwoWayMode(nextValue);
     setAiVoiceEnabled(nextValue);

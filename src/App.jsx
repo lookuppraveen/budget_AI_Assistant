@@ -135,7 +135,7 @@ export default function App() {
   const [ttsSupported, setTtsSupported] = useState(false);
   const [aiVoiceEnabled, setAiVoiceEnabled] = useState(false);
   const [twoWayMode, setTwoWayMode] = useState(false);
-  const [voiceStatus, setVoiceStatus] = useState("Text chat active. Use icons below for voice.");
+  const [voiceStatus, setVoiceStatus] = useState("Type or use the icons below to speak.");
 
   const [isSending, setIsSending] = useState(false);
 
@@ -373,7 +373,7 @@ export default function App() {
     try {
       recognition.start();
     } catch (_error) {
-      setVoiceStatus("Microphone is busy. Try again in a moment.");
+      setVoiceStatus("Mic is busy. Try again.");
     }
   };
 
@@ -390,8 +390,8 @@ export default function App() {
       const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent);
       setVoiceStatus(
         isIosDevice
-          ? "Voice input requires Safari on iOS. Please open this page in Safari to use voice features."
-          : "Voice input is not supported in this browser."
+          ? "Voice needs Safari on iOS. Open this page in Safari to continue."
+          : "Voice input isn't supported in this browser."
       );
       return;
     }
@@ -418,7 +418,7 @@ export default function App() {
 
       rec.onstart = () => {
         setIsListening(true);
-        setVoiceStatus("Listening for your budget question...");
+        setVoiceStatus("Listening...");
       };
 
       rec.onresult = (event) => {
@@ -491,13 +491,13 @@ export default function App() {
         setIsListening(false);
 
         if (event.error === "not-allowed") {
-          setVoiceStatus("Microphone access denied. Please allow mic permission.");
+          setVoiceStatus("Mic access denied. Allow permission and try again.");
           queueVoiceLog({ eventType: "stt_error", status: "not-allowed", metadata: { error: event.error } });
           return;
         }
 
         if (event.error === "no-speech") {
-          setVoiceStatus("No voice detected. Try speaking again.");
+          setVoiceStatus("Nothing heard. Speak clearly and try again.");
           queueVoiceLog({ eventType: "stt_error", status: "no-speech", metadata: { error: event.error } });
           // iOS in two-way mode: no-speech ends the session — restart so the
           // user doesn't have to tap again.
@@ -509,7 +509,7 @@ export default function App() {
           return;
         }
 
-        setVoiceStatus("Voice capture failed. Please try again.");
+        setVoiceStatus("Couldn't capture voice. Try again.");
         queueVoiceLog({ eventType: "stt_error", status: "failed", metadata: { error: event.error } });
       };
 
@@ -521,7 +521,7 @@ export default function App() {
           // pause. Show "captured" status and, on Android (continuous mode),
           // immediately restart so the user can keep speaking. The shared
           // accumulatedTranscriptRef preserves what has been captured so far.
-          setVoiceStatus("Got it — sending your question...");
+          setVoiceStatus("Got it — sending...");
 
           if (!isIOS && twoWayModeRef.current && !isSpeakingRef.current) {
             // Android: restart recognition so the rest of the sentence is captured.
@@ -580,7 +580,7 @@ export default function App() {
       recognitionRef.current.stop();
     }
 
-    setVoiceStatus("Voice listening paused.");
+    setVoiceStatus("Paused.");
   };
 
   // ── iOS audio unlock helpers ──────────────────────────────────────────────
@@ -645,8 +645,8 @@ export default function App() {
       setIsSpeaking(false);
       setVoiceStatus(
         twoWayModeRef.current
-          ? "Two-way mode active. Listening again..."
-          : "Assistant response delivered."
+          ? "Listening..."
+          : "Done."
       );
       if (shouldAutoListenRef.current || twoWayModeRef.current) {
         window.setTimeout(safeStartListening, 400);
@@ -708,7 +708,7 @@ export default function App() {
     window.speechSynthesis?.cancel();
 
     setIsSpeaking(true);
-    setVoiceStatus("Assistant is speaking...");
+    setVoiceStatus("Speaking...");
 
     // Try OpenAI TTS first (shimmer voice) — skip on iOS because blob-URL
     // Audio.play() is blocked by iOS even after the audio-unlock gesture.
@@ -742,8 +742,8 @@ export default function App() {
           setIsSpeaking(false);
           setVoiceStatus(
             twoWayModeRef.current
-              ? "Two-way mode active. Listening again..."
-              : "Assistant response delivered."
+              ? "Listening..."
+              : "Done."
           );
           if (shouldAutoListenRef.current || twoWayModeRef.current) {
             window.setTimeout(safeStartListening, 400);
@@ -781,7 +781,7 @@ export default function App() {
     if (!started) {
       if (onAudioStarted) onAudioStarted();
       setIsSpeaking(false);
-      setVoiceStatus("Voice playback failed. Text response is still available.");
+      setVoiceStatus("Audio failed. Response is in the chat.");
     }
   };
 
@@ -789,7 +789,7 @@ export default function App() {
     const message = rawMessage.trim();
     if (!message) return;
 
-    if (source === "voice") setVoiceStatus("Processing your voice question...");
+    if (source === "voice") setVoiceStatus("Thinking...");
 
     // Show user message immediately
     setMessages((prev) => [...prev, { role: "user", text: message, source }]);
@@ -968,7 +968,7 @@ export default function App() {
     shouldAutoListenRef.current = false; // not a continuous loop
 
     if (nextValue) {
-      setVoiceStatus("Voice + Text mode on. Speak or type your question.");
+      setVoiceStatus("Voice + Text on. Speak or type.");
       safeStartListening();
       return;
     }
@@ -1002,11 +1002,11 @@ export default function App() {
         currentAudioRef.current = null;
       }
       setIsSpeaking(false);
-      setVoiceStatus("AI voice muted. Text responses continue.");
+      setVoiceStatus("Voice muted. Text replies still on.");
       return;
     }
 
-    setVoiceStatus("AI voice enabled.");
+    setVoiceStatus("Voice on.");
   };
 
   const handleLogin = async ({ email, password }) => {

@@ -1870,7 +1870,9 @@ h1 {
 .cp-root {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* Cap height to viewport so the bottom bar is always visible */
+  height: calc(100dvh - 120px);
+  max-height: calc(100dvh - 120px);
   min-height: 0;
   position: relative;
 }
@@ -1931,7 +1933,7 @@ h1 {
   color: #003a70;
 }
 
-/* Chat messages area */
+/* Chat messages area — scrolls within the panel; bottom bar always visible */
 .cp-messages {
   flex: 1;
   overflow-y: auto;
@@ -1939,8 +1941,7 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  min-height: 320px;
-  max-height: 480px;
+  min-height: 0; /* allow flex to shrink so bottom bar is never pushed off */
 }
 
 .cp-msg {
@@ -2117,6 +2118,7 @@ h1 {
   gap: 8px;
   padding: 8px 16px;
   justify-content: flex-end;
+  flex-shrink: 0; /* never compress — always fully visible */
 }
 
 .cp-action-btn {
@@ -2157,11 +2159,11 @@ h1 {
   background: #e2e8f0;
 }
 
-/* Bottom area */
+/* Bottom area — input + voice bar; always pinned at the bottom */
 .cp-bottom {
   border-top: 1px solid var(--edge);
   padding-top: 14px;
-  margin-top: auto;
+  flex-shrink: 0; /* never compress — always fully visible */
 }
 
 /* Input row */
@@ -3667,6 +3669,12 @@ h1 {
     gap: 12px;
   }
 
+  /* Tablet: slightly more topbar height so offset is a bit more */
+  .cp-root {
+    height: calc(100dvh - 100px);
+    max-height: calc(100dvh - 100px);
+  }
+
   .auth-shell {
     grid-template-columns: 1fr;
     align-items: start;
@@ -3798,6 +3806,12 @@ h1 {
 
   .cp-voice-bar {
     justify-content: center;
+  }
+
+  /* Mobile: use full dvh minus topbar (~70px) + outer padding (16px) */
+  .cp-root {
+    height: calc(100dvh - 86px);
+    max-height: calc(100dvh - 86px);
   }
 
   .auth-tabs {

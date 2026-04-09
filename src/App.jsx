@@ -532,7 +532,7 @@ export default function App() {
           ? "Two-way mode active. Listening again..."
           : "Assistant response delivered."
       );
-      if (shouldAutoListenRef.current) {
+      if (shouldAutoListenRef.current || twoWayModeRef.current) {
         window.setTimeout(safeStartListening, 400);
       }
     };
@@ -601,7 +601,7 @@ export default function App() {
               ? "Two-way mode active. Listening again..."
               : "Assistant response delivered."
           );
-          if (shouldAutoListenRef.current) {
+          if (shouldAutoListenRef.current || twoWayModeRef.current) {
             window.setTimeout(safeStartListening, 400);
           }
         };

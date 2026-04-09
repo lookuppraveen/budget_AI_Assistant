@@ -154,13 +154,20 @@ export default function App() {
   // Tracks in-flight chat request so it can be aborted
   const chatAbortControllerRef = useRef(null);
   const speechDebounceRef = useRef(null);
-  // Set to true to skip OpenAI TTS and always use browser SpeechSynthesis.
-  // Flip to false here if the project API key gains TTS model access.
-  const openAiTtsUnavailableRef = useRef(true);
+  // false = try OpenAI TTS first (shimmer voice); true = always use browser TTS.
+  // Automatically flips to true for the session if the API returns an error.
+  const openAiTtsUnavailableRef = useRef(false);
+  // Tracks whether iOS HTML5 Audio has been unlocked via a user gesture.
+  const audioUnlockedRef = useRef(false);
+  // Shared accumulation buffer across recognition instances.
+  // Lives in a ref so Android restarts (new instance) don't lose prior text.
+  const accumulatedTranscriptRef = useRef("");
   // Stores a factory that creates a fresh SpeechRecognition instance with all
   // handlers wired up. Called each time we (re-)start listening so mobile
   // browsers never choke on a reused/stopped instance.
   const createRecognitionRef = useRef(null);
+  // True when running on an iOS device (affects TTS and STT strategy).
+  const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
   const clearSession = () => {
     setSessionUser(null);
@@ -401,8 +408,6 @@ export default function App() {
     // Called by safeStartListening each time we begin a new listening session so
     // Android/iOS never choke on a reused or stopped instance.
     const createRecognitionInstance = () => {
-      let accumulatedTranscript = "";
-
       const rec = new SpeechRecognition();
       rec.lang = "en-US";
       // iOS Safari ignores continuous:true — recognition always ends after one
@@ -430,30 +435,36 @@ export default function App() {
           }
         }
 
+        // Show interim text alongside already-confirmed text
         if (interimTranscript.trim()) {
-          setDraft((accumulatedTranscript ? accumulatedTranscript + " " : "") + interimTranscript.trim());
+          const already = accumulatedTranscriptRef.current;
+          setDraft((already ? already + " " : "") + interimTranscript.trim());
         }
 
         const finalQuestion = finalTranscript.trim();
         if (finalQuestion && sendUserMessageRef.current) {
-          accumulatedTranscript += (accumulatedTranscript ? " " : "") + finalQuestion;
-          setDraft(accumulatedTranscript);
+          // Append to the SHARED ref so Android restarts (new instance) keep prior text
+          accumulatedTranscriptRef.current +=
+            (accumulatedTranscriptRef.current ? " " : "") + finalQuestion;
+          setDraft(accumulatedTranscriptRef.current);
 
-          // Do NOT stop recognition here. Mobile browsers (Android especially)
-          // split sentences into multiple final results — stopping on the first
-          // one cuts the sentence short. Instead we use a rolling debounce:
-          // each new final result resets the timer; after 1200 ms of silence
-          // we stop recognition and send the fully-accumulated text.
+          // Rolling 1200 ms debounce — resets on every new final result.
+          // We do NOT call recognition.stop() here; Android splits long sentences
+          // into multiple final chunks and stopping early loses the rest.
+          // Instead we stop inside the debounce callback once silence is confirmed.
           if (speechDebounceRef.current) {
             clearTimeout(speechDebounceRef.current);
           }
 
           speechDebounceRef.current = window.setTimeout(() => {
-            const textToSend = accumulatedTranscript.trim();
-            accumulatedTranscript = "";
+            const textToSend = accumulatedTranscriptRef.current.trim();
+            // Clear BEFORE stopping so the onend handler sees an empty buffer
+            // and does not attempt another restart cycle.
+            accumulatedTranscriptRef.current = "";
             speechDebounceRef.current = null;
 
-            // Stop recognition now that we are done accumulating.
+            // Now it is safe to stop — onend will fire but speechDebounceRef
+            // is already null so no ghost restart will happen.
             if (recognitionRef.current && isListeningRef.current) {
               recognitionRef.current.stop();
             }
@@ -471,9 +482,8 @@ export default function App() {
       };
 
       rec.onerror = (event) => {
-        // "aborted" fires on Chrome when recognition.stop() is called in
-        // continuous mode — not a real error.
-        // "network" can fire transiently; treat silently.
+        // "aborted" fires when recognition.stop() is called in continuous mode — not a real error.
+        // "network" can fire transiently — treat silently.
         if (event.error === "aborted" || event.error === "network") {
           return;
         }
@@ -489,8 +499,8 @@ export default function App() {
         if (event.error === "no-speech") {
           setVoiceStatus("No voice detected. Try speaking again.");
           queueVoiceLog({ eventType: "stt_error", status: "no-speech", metadata: { error: event.error } });
-          // On iOS in two-way mode, no-speech ends the session — restart so the
-          // user doesn't have to tap the button again.
+          // iOS in two-way mode: no-speech ends the session — restart so the
+          // user doesn't have to tap again.
           if (isIOS && twoWayModeRef.current && !isSpeakingRef.current) {
             window.setTimeout(() => {
               if (twoWayModeRef.current && !isSpeakingRef.current) safeStartListening();
@@ -505,26 +515,31 @@ export default function App() {
 
       rec.onend = () => {
         setIsListening(false);
-        // Only show "captured" status when a debounce is pending — meaning we
-        // stopped intentionally after capturing a final result.
+
         if (speechDebounceRef.current) {
+          // Debounce is still running — recognition ended before the user's full
+          // pause. Show "captured" status and, on Android (continuous mode),
+          // immediately restart so the user can keep speaking. The shared
+          // accumulatedTranscriptRef preserves what has been captured so far.
           setVoiceStatus("Got it — sending your question...");
+
+          if (!isIOS && twoWayModeRef.current && !isSpeakingRef.current) {
+            // Android: restart recognition so the rest of the sentence is captured.
+            // The rolling debounce will fire when the user truly stops speaking.
+            window.setTimeout(() => {
+              if (speechDebounceRef.current) safeStartListening();
+            }, 120);
+          }
+          return;
         }
 
-        // ── Restart logic ──────────────────────────────────────────────────
-        // shouldAutoListenRef: legacy continuous-loop flag (currently unused in
-        //   two-way mode, kept for future use).
-        // isIOS + twoWayMode: iOS recognition always ends after one utterance.
-        //   Restart here immediately if AI is not already speaking, otherwise
-        //   audio.onended will restart after TTS finishes.
+        // ── Normal end (debounce already fired / manual stop) ──────────────
+        // shouldAutoListenRef: for future continuous-loop use.
+        // isIOS + twoWayMode: iOS always ends after one utterance — restart
+        //   immediately unless TTS is about to play (audio.onended handles that).
         if (shouldAutoListenRef.current && !isSpeakingRef.current) {
           window.setTimeout(() => safeStartListening(), 250);
-        } else if (
-          isIOS &&
-          twoWayModeRef.current &&
-          !isSpeakingRef.current &&
-          !speechDebounceRef.current // debounce pending means we're waiting for TTS
-        ) {
+        } else if (isIOS && twoWayModeRef.current && !isSpeakingRef.current) {
           window.setTimeout(() => {
             if (twoWayModeRef.current && !isSpeakingRef.current) safeStartListening();
           }, 300);
@@ -568,39 +583,59 @@ export default function App() {
     setVoiceStatus("Voice listening paused.");
   };
 
-  // Speak text using browser SpeechSynthesis (no API key needed).
-  // iOS Safari requires the audio session to be "unlocked" via a synchronous
-  // call inside a user-gesture handler before any async speak() call will work.
-  // Call iosUnlockSpeech() in every button-click handler that may trigger TTS.
+  // ── iOS audio unlock helpers ──────────────────────────────────────────────
+  // iOS Safari blocks both speechSynthesis.speak() and Audio.play() when called
+  // from async code. Both must be "unlocked" once from a synchronous user-gesture
+  // handler. Call unlockAudio() inside every button click that may trigger TTS.
+
   const iosUnlockSpeech = () => {
     const synth = window.speechSynthesis;
     if (!synth) return;
-    // Speak an empty utterance synchronously within the gesture to prime iOS audio.
-    const silent = new SpeechSynthesisUtterance("");
+    // iOS requires non-empty text — an empty string is sometimes ignored.
+    // A zero-width space primes the audio session without producing audible output.
+    const silent = new SpeechSynthesisUtterance("\u200B");
     silent.volume = 0;
     synth.speak(silent);
   };
 
+  const unlockAudio = () => {
+    if (audioUnlockedRef.current) return;
+    audioUnlockedRef.current = true;
+    // Unlock HTML5 Audio (needed for the OpenAI TTS blob playback on iOS)
+    try {
+      const a = new Audio();
+      a.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+      a.volume = 0;
+      a.play().catch(() => {});
+    } catch (_) {}
+    // Unlock Web Audio API context (needed on some iOS versions)
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start(0);
+      ctx.resume().catch(() => {});
+    } catch (_) {}
+  };
+
+  // ── Browser SpeechSynthesis fallback ──────────────────────────────────────
   const speakWithBrowser = (spokenText, onAudioStarted) => {
     const synth = window.speechSynthesis;
     if (!synth) return false;
 
-    synth.cancel(); // stop anything already speaking
+    // Only cancel if something is currently speaking.
+    // On iOS Safari, calling synth.cancel() when nothing is queued can corrupt
+    // the speech session that iosUnlockSpeech() just primed, silencing all
+    // subsequent speak() calls for the rest of the page session.
+    if (synth.speaking || synth.pending) {
+      synth.cancel();
+    }
 
     const utterance = new SpeechSynthesisUtterance(spokenText);
-    utterance.rate = 0.93;  // slightly relaxed pace — feels more natural in conversation
-    utterance.pitch = 1.08; // very slight lift — warmer, friendlier tone
-
-    // Assign voice — voices may not be loaded yet on first page load (iOS/mobile).
-    // Try immediately; if the list is empty, wait for voiceschanged then retry.
-    const assignVoiceAndSpeak = () => {
-      const voices = synth.getVoices();
-      const preferred =
-        voices.find((v) => v.lang.startsWith("en") && v.localService) ||
-        voices.find((v) => v.lang.startsWith("en"));
-      if (preferred) utterance.voice = preferred;
-      synth.speak(utterance);
-    };
+    utterance.rate = 0.93;
+    utterance.pitch = 1.08;
 
     utterance.onstart = () => {
       if (onAudioStarted) onAudioStarted();
@@ -619,22 +654,35 @@ export default function App() {
     };
 
     utterance.onerror = (e) => {
-      // "canceled" fires when synth.cancel() is called mid-speech — not a real error
       if (e.error === "canceled" || e.error === "interrupted") return;
       setIsSpeaking(false);
       if (onAudioStarted) onAudioStarted();
     };
 
+    // Pick the best available English voice.
+    // Voices may not be populated yet on first page load (Safari/iOS/mobile).
+    // Use a spoken flag to prevent double-firing when voiceschanged + timeout both resolve.
+    let spoken = false;
+    const doSpeak = () => {
+      if (spoken) return;
+      spoken = true;
+      const voices = synth.getVoices();
+      // Prefer high-quality local female English voices by name, then any local English
+      const preferred =
+        voices.find((v) => /Samantha|Karen|Moira|Victoria|Zira|Google US English/i.test(v.name)) ||
+        voices.find((v) => v.lang === "en-US" && v.localService) ||
+        voices.find((v) => v.lang.startsWith("en") && v.localService) ||
+        voices.find((v) => v.lang.startsWith("en"));
+      if (preferred) utterance.voice = preferred;
+      synth.speak(utterance);
+    };
+
     const voices = synth.getVoices();
     if (voices.length > 0) {
-      assignVoiceAndSpeak();
+      doSpeak();
     } else {
-      // Voices not loaded yet (common on iOS/mobile first load)
-      synth.addEventListener("voiceschanged", assignVoiceAndSpeak, { once: true });
-      // Fallback: if voiceschanged never fires, speak anyway after a short wait
-      window.setTimeout(() => {
-        if (!utterance.voice) synth.speak(utterance);
-      }, 250);
+      synth.addEventListener("voiceschanged", doSpeak, { once: true });
+      window.setTimeout(doSpeak, 300); // fallback if voiceschanged never fires
     }
 
     return true;
@@ -662,9 +710,10 @@ export default function App() {
     setIsSpeaking(true);
     setVoiceStatus("Assistant is speaking...");
 
-    // Try OpenAI TTS first; fall back to browser SpeechSynthesis on any error.
-    // Once it fails once (403/500 = no model access), skip it for the rest of the session.
-    if (sessionTokenRef.current && !openAiTtsUnavailableRef.current) {
+    // Try OpenAI TTS first (shimmer voice) — skip on iOS because blob-URL
+    // Audio.play() is blocked by iOS even after the audio-unlock gesture.
+    // iOS goes straight to speakWithBrowser() which uses the primed SpeechSynthesis session.
+    if (sessionTokenRef.current && !openAiTtsUnavailableRef.current && !isIOSDevice) {
       try {
         const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api/v1";
         const response = await fetch(`${apiBase}/tts/speak`, {
@@ -677,6 +726,7 @@ export default function App() {
         });
 
         if (!response.ok) {
+          // Mark unavailable only for server-side failures (no API access etc.)
           openAiTtsUnavailableRef.current = true;
           throw new Error(`TTS ${response.status}`);
         }
@@ -706,16 +756,27 @@ export default function App() {
           speakWithBrowser(spokenText, null);
         };
 
-        await audio.play();
-        if (onAudioStarted) onAudioStarted();
-        return;
+        try {
+          await audio.play();
+          if (onAudioStarted) onAudioStarted();
+          return;
+        } catch (playErr) {
+          // NotAllowedError = browser blocked autoplay — do NOT mark OpenAI as
+          // unavailable (it's a permissions issue, not an API issue).
+          // Fall through to browser TTS for this call only.
+          URL.revokeObjectURL(url);
+          currentAudioRef.current = null;
+          if (playErr.name !== "NotAllowedError") {
+            openAiTtsUnavailableRef.current = true;
+          }
+        }
       } catch (_err) {
-        // OpenAI TTS unavailable — fall through to browser TTS and skip next time
+        // Network / API error — mark unavailable and fall through to browser TTS
         openAiTtsUnavailableRef.current = true;
       }
     }
 
-    // Browser SpeechSynthesis fallback
+    // Browser SpeechSynthesis fallback (always used on iOS; fallback elsewhere)
     const started = speakWithBrowser(spokenText, onAudioStarted);
     if (!started) {
       if (onAudioStarted) onAudioStarted();
@@ -883,8 +944,9 @@ export default function App() {
 
   // Mic-only mode: voice input → text response only. Disables voice output.
   const startListening = () => {
-    // Prime iOS audio session synchronously within this user-gesture handler.
+    // Unlock iOS audio (speechSynthesis + HTML5 Audio) within this user gesture.
     iosUnlockSpeech();
+    unlockAudio();
     shouldAutoListenRef.current = false;
     setAiVoiceEnabled(false);
     aiVoiceEnabledRef.current = false;
@@ -894,9 +956,10 @@ export default function App() {
   // Voice + Text mode: enables voice output AND starts listening.
   // Turning it off reverts to text-only. Not continuous — user must click Mic or this button again to speak.
   const toggleTwoWayMode = () => {
-    // Prime iOS audio session synchronously within this user-gesture handler so
-    // speechSynthesis.speak() works later when the AI response arrives (async).
+    // Unlock iOS audio (speechSynthesis + HTML5 Audio) within this user gesture
+    // so both speakWithBrowser() and Audio.play() work when the AI responds (async).
     iosUnlockSpeech();
+    unlockAudio();
 
     const nextValue = !twoWayModeRef.current;
     setTwoWayMode(nextValue);

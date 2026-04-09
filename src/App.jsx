@@ -157,6 +157,10 @@ export default function App() {
   // Set to true to skip OpenAI TTS and always use browser SpeechSynthesis.
   // Flip to false here if the project API key gains TTS model access.
   const openAiTtsUnavailableRef = useRef(true);
+  // Stores a factory that creates a fresh SpeechRecognition instance with all
+  // handlers wired up. Called each time we (re-)start listening so mobile
+  // browsers never choke on a reused/stopped instance.
+  const createRecognitionRef = useRef(null);
 
   const clearSession = () => {
     setSessionUser(null);
@@ -342,11 +346,22 @@ export default function App() {
   }, [sessionUser]);
 
   const safeStartListening = () => {
-    const recognition = recognitionRef.current;
-
-    if (!recognition || !sttSupportedRef.current || isListeningRef.current) {
+    if (!sttSupportedRef.current || isListeningRef.current || !createRecognitionRef.current) {
       return;
     }
+
+    // Always tear down the old instance before starting a new one.
+    // Reusing a stopped SpeechRecognition on Android/iOS causes silent failures.
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;   // prevent stale onend from firing
+      recognitionRef.current.onresult = null;
+      recognitionRef.current.onerror = null;
+      try { recognitionRef.current.abort(); } catch (_) {}
+      recognitionRef.current = null;
+    }
+
+    const recognition = createRecognitionRef.current();
+    recognitionRef.current = recognition;
 
     try {
       recognition.start();
@@ -358,132 +373,176 @@ export default function App() {
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-    if (!SpeechRecognition) {
-      setVoiceStatus("Voice input is not supported in this browser.");
-    }
-
-    setSttSupported(Boolean(SpeechRecognition));
     // TTS is always "supported" — we use OpenAI API, not browser synthesis
     setTtsSupported(true);
 
     if (!SpeechRecognition) {
+      setSttSupported(false);
+      // iOS Chrome / Firefox use WebKit but don't expose the Speech API.
+      // Direct the user to Safari where webkitSpeechRecognition is available.
+      const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      setVoiceStatus(
+        isIosDevice
+          ? "Voice input requires Safari on iOS. Please open this page in Safari to use voice features."
+          : "Voice input is not supported in this browser."
+      );
       return;
     }
 
-    let accumulatedTranscript = "";
+    setSttSupported(true);
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.continuous = true;
-    recognition.interimResults = true;
+    // iOS Safari exposes webkitSpeechRecognition but silently ignores
+    // continuous:true — it always ends after one utterance.
+    // We detect iOS here so the factory and onend handler can adapt.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
-    recognition.onstart = () => {
-      setIsListening(true);
-      setVoiceStatus("Listening for your budget question...");
-    };
+    // ── Recognition factory ───────────────────────────────────────────────────
+    // Returns a fully wired-up (but not yet started) SpeechRecognition instance.
+    // Called by safeStartListening each time we begin a new listening session so
+    // Android/iOS never choke on a reused or stopped instance.
+    const createRecognitionInstance = () => {
+      let accumulatedTranscript = "";
 
-    recognition.onresult = (event) => {
-      let interimTranscript = "";
-      let finalTranscript = "";
+      const rec = new SpeechRecognition();
+      rec.lang = "en-US";
+      // iOS Safari ignores continuous:true — recognition always ends after one
+      // utterance regardless. Set it false explicitly so behaviour is predictable.
+      rec.continuous = !isIOS;
+      // iOS interim results are unreliable; skip them to reduce noise.
+      rec.interimResults = !isIOS;
 
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index];
-        const transcript = result[0].transcript;
+      rec.onstart = () => {
+        setIsListening(true);
+        setVoiceStatus("Listening for your budget question...");
+      };
 
-        if (result.isFinal) {
-          finalTranscript += transcript;
-        } else {
-          interimTranscript += transcript;
-        }
-      }
+      rec.onresult = (event) => {
+        let interimTranscript = "";
+        let finalTranscript = "";
 
-      if (interimTranscript.trim()) {
-        setDraft((accumulatedTranscript ? accumulatedTranscript + " " : "") + interimTranscript.trim());
-      }
-
-      const finalQuestion = finalTranscript.trim();
-      if (finalQuestion && sendUserMessageRef.current) {
-        accumulatedTranscript += (accumulatedTranscript ? " " : "") + finalQuestion;
-        setDraft(accumulatedTranscript);
-
-        // Stop recognition immediately on first final result so the mic
-        // turns off and Chrome stops sending more events. The debounce then
-        // waits a beat before submitting, giving the user a moment to see
-        // their captured text before it sends.
-        if (recognitionRef.current && isListeningRef.current) {
-          recognitionRef.current.stop();
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index];
+          const transcript = result[0].transcript;
+          if (result.isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
         }
 
+        if (interimTranscript.trim()) {
+          setDraft((accumulatedTranscript ? accumulatedTranscript + " " : "") + interimTranscript.trim());
+        }
+
+        const finalQuestion = finalTranscript.trim();
+        if (finalQuestion && sendUserMessageRef.current) {
+          accumulatedTranscript += (accumulatedTranscript ? " " : "") + finalQuestion;
+          setDraft(accumulatedTranscript);
+
+          // Stop recognition immediately on first final result so the mic
+          // turns off and Chrome stops sending more events. The debounce then
+          // waits a beat before submitting, giving the user a moment to see
+          // their captured text before it sends.
+          if (recognitionRef.current && isListeningRef.current) {
+            recognitionRef.current.stop();
+          }
+
+          if (speechDebounceRef.current) {
+            clearTimeout(speechDebounceRef.current);
+          }
+
+          speechDebounceRef.current = window.setTimeout(() => {
+            const textToSend = accumulatedTranscript.trim();
+            accumulatedTranscript = "";
+            speechDebounceRef.current = null;
+            queueVoiceLog({
+              eventType: "user_utterance",
+              direction: "user",
+              transcript: textToSend,
+              status: "captured"
+            });
+            sendUserMessageRef.current(textToSend, "voice");
+          }, 800);
+        }
+      };
+
+      rec.onerror = (event) => {
+        // "aborted" fires on Chrome when recognition.stop() is called in
+        // continuous mode — not a real error.
+        // "network" can fire transiently; treat silently.
+        if (event.error === "aborted" || event.error === "network") {
+          return;
+        }
+
+        setIsListening(false);
+
+        if (event.error === "not-allowed") {
+          setVoiceStatus("Microphone access denied. Please allow mic permission.");
+          queueVoiceLog({ eventType: "stt_error", status: "not-allowed", metadata: { error: event.error } });
+          return;
+        }
+
+        if (event.error === "no-speech") {
+          setVoiceStatus("No voice detected. Try speaking again.");
+          queueVoiceLog({ eventType: "stt_error", status: "no-speech", metadata: { error: event.error } });
+          // On iOS in two-way mode, no-speech ends the session — restart so the
+          // user doesn't have to tap the button again.
+          if (isIOS && twoWayModeRef.current && !isSpeakingRef.current) {
+            window.setTimeout(() => {
+              if (twoWayModeRef.current && !isSpeakingRef.current) safeStartListening();
+            }, 500);
+          }
+          return;
+        }
+
+        setVoiceStatus("Voice capture failed. Please try again.");
+        queueVoiceLog({ eventType: "stt_error", status: "failed", metadata: { error: event.error } });
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+        // Only show "captured" status when a debounce is pending — meaning we
+        // stopped intentionally after capturing a final result.
         if (speechDebounceRef.current) {
-          clearTimeout(speechDebounceRef.current);
+          setVoiceStatus("Got it — sending your question...");
         }
 
-        speechDebounceRef.current = window.setTimeout(() => {
-          const textToSend = accumulatedTranscript.trim();
-          accumulatedTranscript = "";
-          speechDebounceRef.current = null;
-          queueVoiceLog({
-            eventType: "user_utterance",
-            direction: "user",
-            transcript: textToSend,
-            status: "captured"
-          });
-          sendUserMessageRef.current(textToSend, "voice");
-        }, 800);
-      }
+        // ── Restart logic ──────────────────────────────────────────────────
+        // shouldAutoListenRef: legacy continuous-loop flag (currently unused in
+        //   two-way mode, kept for future use).
+        // isIOS + twoWayMode: iOS recognition always ends after one utterance.
+        //   Restart here immediately if AI is not already speaking, otherwise
+        //   audio.onended will restart after TTS finishes.
+        if (shouldAutoListenRef.current && !isSpeakingRef.current) {
+          window.setTimeout(() => safeStartListening(), 250);
+        } else if (
+          isIOS &&
+          twoWayModeRef.current &&
+          !isSpeakingRef.current &&
+          !speechDebounceRef.current // debounce pending means we're waiting for TTS
+        ) {
+          window.setTimeout(() => {
+            if (twoWayModeRef.current && !isSpeakingRef.current) safeStartListening();
+          }, 300);
+        }
+      };
+
+      return rec;
     };
 
-    recognition.onerror = (event) => {
-      // "aborted" fires on Chrome when recognition.stop() is called in continuous mode — not a real error
-      // "network" can fire transiently; treat silently so the UI doesn't alarm the user
-      if (event.error === "aborted" || event.error === "network") {
-        return;
-      }
-
-      setIsListening(false);
-
-      if (event.error === "not-allowed") {
-        setVoiceStatus("Microphone access denied. Please allow mic permission.");
-        queueVoiceLog({ eventType: "stt_error", status: "not-allowed", metadata: { error: event.error } });
-        return;
-      }
-
-      if (event.error === "no-speech") {
-        setVoiceStatus("No voice detected. Try speaking again.");
-        queueVoiceLog({ eventType: "stt_error", status: "no-speech", metadata: { error: event.error } });
-        return;
-      }
-
-      setVoiceStatus("Voice capture failed. Please try again.");
-      queueVoiceLog({ eventType: "stt_error", status: "failed", metadata: { error: event.error } });
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      // Only show "captured" status if a debounce is pending (meaning we
-      // stopped intentionally after a final result, not from a manual stop)
-      if (speechDebounceRef.current) {
-        setVoiceStatus("Got it — sending your question...");
-      }
-
-      if (shouldAutoListenRef.current && !isSpeakingRef.current) {
-        window.setTimeout(() => {
-          safeStartListening();
-        }, 250);
-      }
-    };
-
-    recognitionRef.current = recognition;
+    // Store the factory so safeStartListening can call it at any time.
+    createRecognitionRef.current = createRecognitionInstance;
 
     return () => {
+      createRecognitionRef.current = null;
       if (recognitionRef.current) {
         recognitionRef.current.onstart = null;
         recognitionRef.current.onresult = null;
         recognitionRef.current.onerror = null;
         recognitionRef.current.onend = null;
-        recognitionRef.current.stop();
+        try { recognitionRef.current.abort(); } catch (_) {}
+        recognitionRef.current = null;
       }
-      // Stop any playing OpenAI TTS audio on unmount
       if (currentAudioRef.current) {
         currentAudioRef.current.pause();
         currentAudioRef.current = null;
@@ -513,8 +572,8 @@ export default function App() {
     synth.cancel(); // stop anything already speaking
 
     const utterance = new SpeechSynthesisUtterance(spokenText);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+    utterance.rate = 0.93;  // slightly relaxed pace — feels more natural in conversation
+    utterance.pitch = 1.08; // very slight lift — warmer, friendlier tone
 
     // Prefer a natural English voice if available
     const voices = synth.getVoices();
@@ -579,7 +638,7 @@ export default function App() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${sessionTokenRef.current}`
           },
-          body: JSON.stringify({ text: spokenText, voice: "nova" })
+          body: JSON.stringify({ text: spokenText, voice: "shimmer" })
         });
 
         if (!response.ok) {
@@ -810,10 +869,14 @@ export default function App() {
       return;
     }
 
-    // Turning off: stop listening and any playing audio
+    // Turning off: abort recognition and stop any playing audio
     shouldAutoListenRef.current = false;
-    if (recognitionRef.current && isListeningRef.current) {
-      recognitionRef.current.stop();
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null; // prevent restart from firing
+      recognitionRef.current.onresult = null;
+      recognitionRef.current.onerror = null;
+      try { recognitionRef.current.abort(); } catch (_) {}
+      recognitionRef.current = null;
     }
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();

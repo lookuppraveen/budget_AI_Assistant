@@ -128,7 +128,15 @@ function buildOpenAiMessages(message, chunks, history, source) {
     : "No approved knowledge found for this query.";
 
   const voiceGuidance = source === "voice"
-    ? `\n- This response will be read aloud by text-to-speech. Write in short, natural spoken sentences. Do NOT use bullet points, numbered lists, bold text, headers, or markdown of any kind. Speak as if talking directly to the person.`
+    ? `\n- This response will be spoken aloud by text-to-speech so it must sound like natural, friendly conversation — not a written document.
+- Tone: warm, approachable, and conversational. Imagine explaining this to a friend who asked you about it — knowledgeable but relaxed, not stiff or corporate.
+- Use contractions freely: it's, you'll, we've, that's, here's, let's, isn't, doesn't, won't.
+- Keep sentences short and punchy. One idea per sentence. Pause naturally between thoughts.
+- It's fine to open with a brief friendly acknowledgement like "Great question!", "So here's the thing —", "Yeah, so basically —", or "Sure!" when it fits naturally. Don't overdo it.
+- Vary your sentence length and rhythm so it doesn't sound monotone when read aloud.
+- Do NOT use bullet points, numbered lists, bold text, headers, dashes for lists, or any markdown. No asterisks, no hashes, no colons introducing lists.
+- Do NOT say things like "Based on the provided sources" or "According to my knowledge". Just say it naturally, as if you already know it.
+- Keep the response concise — under 4–5 sentences for simple questions, up to 8–10 for complex ones.`
     : "";
 
   const suggestionsGuidance = source !== "voice"

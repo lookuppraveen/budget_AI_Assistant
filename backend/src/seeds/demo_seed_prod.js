@@ -842,13 +842,15 @@ async function seedKnowledgeDocuments(users) {
       log(`[skip] Knowledge doc exists: ${d.title.slice(0, 60)}`);
       docId = existing.rows[0].id;
     } else {
+      // Use mapped dept or fall back to first available department
+      const resolvedDeptId = deptMap[d.dept] || Object.values(deptMap)[0];
       const res = await query(
         `INSERT INTO knowledge_documents (title, source_type, domain, department_id, submitted_by, status, reviewed_by, reviewed_at, metadata)
          VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8)
          RETURNING id`,
         [
           d.title, d.source_type, d.domain,
-          deptMap[d.dept], d.submitted_by, d.status,
+          resolvedDeptId, d.submitted_by, d.status,
           d.reviewed_by || null,
           JSON.stringify({ wordCount: d.content.split(" ").length, seedData: true }),
         ]

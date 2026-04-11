@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { deleteConversation, getConversationMessages, listConversations } from "../../services/api.js";
+import { deleteConversation, getConversationMessages, listConversations, updateConversationContext } from "../../services/api.js";
+import { submitFeedback, getMessageExplanation } from "../../services/scenariosApi.js";
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 function IconMic() {
@@ -57,6 +58,24 @@ function IconClose() {
   );
 }
 
+// ── Agent type labels ─────────────────────────────────────────────────────────
+const AGENT_LABELS = {
+  general:     "General",
+  policy:      "Policy",
+  analyst:     "Analyst",
+  forecasting: "Forecasting",
+  board:       "Executive",
+  drafting:    "Drafting",
+};
+const AGENT_COLORS = {
+  general:     "#6b7280",
+  policy:      "#7c3aed",
+  analyst:     "#2563eb",
+  forecasting: "#d97706",
+  board:       "#16a34a",
+  drafting:    "#0891b2",
+};
+
 // ── Helper ────────────────────────────────────────────────────────────────────
 function formatTime(dateStr) {
   if (!dateStr) return "";
@@ -102,6 +121,83 @@ export default function ChatPanel({
   const [deletingConvId, setDeletingConvId] = useState(null);
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Feedback: { [messageId]: 1 | -1 }
+  const [feedbackState, setFeedbackState] = useState({});
+  // Explain: { [messageId]: { loading: bool, data: obj|null, open: bool } }
+  const [explainState, setExplainState] = useState({});
+
+  const handleFeedback = async (messageId, rating) => {
+    if (!messageId || feedbackState[messageId]) return;
+    setFeedbackState((prev) => ({ ...prev, [messageId]: rating }));
+    try { await submitFeedback(authToken, messageId, { rating }); } catch (_e) { /* silent */ }
+  };
+
+  const handleToggleExplain = async (messageId) => {
+    if (!messageId) return;
+    const cur = explainState[messageId];
+    if (cur?.open) {
+      setExplainState((prev) => ({ ...prev, [messageId]: { ...cur, open: false } }));
+      return;
+    }
+    if (cur?.data) {
+      setExplainState((prev) => ({ ...prev, [messageId]: { ...cur, open: true } }));
+      return;
+    }
+    setExplainState((prev) => ({ ...prev, [messageId]: { loading: true, data: null, open: false } }));
+    try {
+      const result = await getMessageExplanation(authToken, messageId);
+      setExplainState((prev) => ({ ...prev, [messageId]: { loading: false, data: result.explanation, open: true } }));
+    } catch (_e) {
+      setExplainState((prev) => ({ ...prev, [messageId]: { loading: false, data: null, open: false } }));
+    }
+  };
+
+  // ── Budget context bar ────────────────────────────────────────────────────
+  const [showContextBar, setShowContextBar] = useState(false);
+  const [ctxDept, setCtxDept] = useState("");
+  const [ctxFundType, setCtxFundType] = useState("");
+  const [ctxFiscalYear, setCtxFiscalYear] = useState("");
+  const [ctxSaving, setCtxSaving] = useState(false);
+  const [ctxSaved, setCtxSaved] = useState(false);
+
+  const hasContext = ctxDept || ctxFundType || ctxFiscalYear;
+
+  // Reset context fields when conversation changes
+  useEffect(() => {
+    setCtxDept("");
+    setCtxFundType("");
+    setCtxFiscalYear("");
+    setCtxSaved(false);
+  }, [currentConversationId]);
+
+  const handleSaveContext = async () => {
+    if (!currentConversationId || ctxSaving) return;
+    setCtxSaving(true);
+    try {
+      const payload = {};
+      if (ctxDept) payload.department = ctxDept;
+      if (ctxFundType) payload.fundType = ctxFundType;
+      if (ctxFiscalYear) payload.fiscalYear = ctxFiscalYear;
+      await updateConversationContext(authToken, currentConversationId, payload);
+      setCtxSaved(true);
+      setTimeout(() => setCtxSaved(false), 2000);
+    } catch (_e) {
+      /* silent */
+    } finally {
+      setCtxSaving(false);
+    }
+  };
+
+  const handleClearContext = () => {
+    setCtxDept("");
+    setCtxFundType("");
+    setCtxFiscalYear("");
+    setCtxSaved(false);
+    if (currentConversationId) {
+      updateConversationContext(authToken, currentConversationId, {}).catch(() => {});
+    }
+  };
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -180,6 +276,84 @@ export default function ChatPanel({
         </div>
       </div>
 
+      {/* ── Budget context bar ─────────────────────────────────────── */}
+      <div className="cp-ctx-strip">
+        <button
+          type="button"
+          className={`cp-ctx-toggle ${hasContext ? "cp-ctx-toggle-active" : ""}`}
+          onClick={() => setShowContextBar((v) => !v)}
+          title="Set budget context (department, fund type, fiscal year) to ground AI responses"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+            strokeLinecap="round" strokeLinejoin="round" width="14" height="14" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
+          </svg>
+          {hasContext ? (
+            <span className="cp-ctx-active-pill">
+              {[ctxDept, ctxFundType, ctxFiscalYear].filter(Boolean).join(" · ")}
+            </span>
+          ) : (
+            <span>Set Budget Context</span>
+          )}
+        </button>
+
+        {showContextBar && (
+          <div className="cp-ctx-bar">
+            <div className="cp-ctx-fields">
+              <label className="cp-ctx-field">
+                <span>Department</span>
+                <input
+                  type="text"
+                  value={ctxDept}
+                  onChange={(e) => setCtxDept(e.target.value)}
+                  placeholder="e.g. Financial Aid"
+                  maxLength={80}
+                />
+              </label>
+              <label className="cp-ctx-field">
+                <span>Fund Type</span>
+                <input
+                  type="text"
+                  value={ctxFundType}
+                  onChange={(e) => setCtxFundType(e.target.value)}
+                  placeholder="e.g. Operating, Capital"
+                  maxLength={40}
+                />
+              </label>
+              <label className="cp-ctx-field">
+                <span>Fiscal Year</span>
+                <input
+                  type="text"
+                  value={ctxFiscalYear}
+                  onChange={(e) => setCtxFiscalYear(e.target.value)}
+                  placeholder="e.g. FY2026"
+                  maxLength={20}
+                />
+              </label>
+            </div>
+            <div className="cp-ctx-actions">
+              <button
+                type="button"
+                className="cp-ctx-save-btn"
+                onClick={handleSaveContext}
+                disabled={!currentConversationId || ctxSaving || !hasContext}
+              >
+                {ctxSaving ? "Saving…" : ctxSaved ? "Saved!" : "Apply Context"}
+              </button>
+              {hasContext && (
+                <button type="button" className="cp-ctx-clear-btn" onClick={handleClearContext}>
+                  Clear
+                </button>
+              )}
+              {!currentConversationId && (
+                <span className="cp-ctx-hint">Start a conversation first to apply context.</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* ── Chat window ────────────────────────────────────────────── */}
       <div className="cp-messages" role="log" aria-live="polite">
         {messages.map((msg, i) => {
@@ -191,9 +365,23 @@ export default function ChatPanel({
             Array.isArray(msg.suggestions) &&
             msg.suggestions.length > 0;
 
+          const explainInfo = msg.id ? explainState[msg.id] : null;
+          const myFeedback = msg.id ? feedbackState[msg.id] : null;
+
           return (
             <div key={`${msg.role}-${i}`} className={`cp-msg cp-msg-${msg.role}${msg._streamingKey ? " cp-msg-streaming" : ""}`}>
               <span className="cp-msg-label">{msg.role === "user" ? "You" : "Assistant"}</span>
+              {/* Agent type badge */}
+              {msg.role === "assistant" && msg.agentType && msg.agentType !== "general" && (
+                <span style={{
+                  display: "inline-block", marginLeft: 8, padding: "1px 7px", borderRadius: 10,
+                  background: (AGENT_COLORS[msg.agentType] || "#6b7280") + "20",
+                  color: AGENT_COLORS[msg.agentType] || "#6b7280",
+                  fontSize: 11, fontWeight: 700, verticalAlign: "middle", marginBottom: 2
+                }}>
+                  {AGENT_LABELS[msg.agentType] || msg.agentType} Agent
+                </span>
+              )}
               <p className="cp-msg-text">{msg.text}</p>
               {msg.source === "voice" && (
                 <span className="cp-msg-badge">
@@ -216,6 +404,62 @@ export default function ChatPanel({
                       </li>
                     ))}
                   </ul>
+                </div>
+              )}
+              {/* Feedback + Show me why (non-streaming assistant messages) */}
+              {msg.role === "assistant" && !msg._streamingKey && msg.id && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    title="Helpful"
+                    onClick={() => handleFeedback(msg.id, 1)}
+                    style={{
+                      padding: "3px 10px", border: "1px solid", borderRadius: 6, cursor: myFeedback ? "default" : "pointer",
+                      fontSize: 12, background: myFeedback === 1 ? "#dcfce7" : "white",
+                      borderColor: myFeedback === 1 ? "#16a34a" : "#d1d5db",
+                      color: myFeedback === 1 ? "#16a34a" : "#6b7280"
+                    }}
+                  >
+                    👍 {myFeedback === 1 ? "Helpful" : ""}
+                  </button>
+                  <button
+                    type="button"
+                    title="Not helpful"
+                    onClick={() => handleFeedback(msg.id, -1)}
+                    style={{
+                      padding: "3px 10px", border: "1px solid", borderRadius: 6, cursor: myFeedback ? "default" : "pointer",
+                      fontSize: 12, background: myFeedback === -1 ? "#fef2f2" : "white",
+                      borderColor: myFeedback === -1 ? "#dc2626" : "#d1d5db",
+                      color: myFeedback === -1 ? "#dc2626" : "#6b7280"
+                    }}
+                  >
+                    👎 {myFeedback === -1 ? "Not helpful" : ""}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleExplain(msg.id)}
+                    style={{
+                      padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+                      fontSize: 12, background: explainInfo?.open ? "#eff6ff" : "white",
+                      borderColor: explainInfo?.open ? "#2563eb" : "#d1d5db",
+                      color: explainInfo?.open ? "#2563eb" : "#6b7280"
+                    }}
+                  >
+                    {explainInfo?.loading ? "Loading…" : explainInfo?.open ? "Hide Why" : "Show me why"}
+                  </button>
+                  {explainInfo?.open && explainInfo?.data && (
+                    <div style={{ width: "100%", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: "12px 14px", marginTop: 4, fontSize: 12 }}>
+                      <div style={{ fontWeight: 700, color: "#0369a1", marginBottom: 6 }}>
+                        {explainInfo.data.agentLabel}
+                      </div>
+                      <div style={{ color: "#374151", lineHeight: 1.5, marginBottom: 8 }}>{explainInfo.data.explanation}</div>
+                      {explainInfo.data.topSourceExcerpt && (
+                        <div style={{ color: "#6b7280", fontStyle: "italic", borderLeft: "2px solid #bae6fd", paddingLeft: 8 }}>
+                          "{explainInfo.data.topSourceExcerpt}"
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {showSuggestions && (

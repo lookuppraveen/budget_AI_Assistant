@@ -24,6 +24,10 @@ import { sharepointRouter } from "./modules/sharepoint/sharepoint.routes.js";
 import { auditRouter } from "./modules/audit/audit.routes.js";
 import { manualReportsRouter } from "./modules/manual-reports/manual-reports.routes.js";
 import { ttsRouter } from "./modules/tts/tts.routes.js";
+import { budgetRequestsRouter } from "./modules/budget-requests/budget-requests.routes.js";
+import { schedulerRouter }      from "./modules/scheduler/scheduler.routes.js";
+import { scenariosRouter }      from "./modules/scenarios/scenarios.routes.js";
+import { decisionLogRouter }    from "./modules/decision-log/decision-log.routes.js";
 import { notFoundHandler } from "./middleware/not-found.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
@@ -93,6 +97,10 @@ app.use("/api/v1/sharepoint", sharepointRouter);
 app.use("/api/v1/audit", auditRouter);
 app.use("/api/v1/manual-reports", manualReportsRouter);
 app.use("/api/v1/tts", ttsRouter);
+app.use("/api/v1/budget-requests", budgetRequestsRouter);
+app.use("/api/v1/scheduler",      schedulerRouter);
+app.use("/api/v1/scenarios",      scenariosRouter);
+app.use("/api/v1/decision-log",   decisionLogRouter);
 
 app.use("/api/v1/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get("/api/v1/docs.json", (_req, res) => res.json(swaggerSpec));

@@ -128,6 +128,24 @@ export async function updateMasterValue(valueId, value) {
   };
 }
 
+/**
+ * Public read — returns active values for a single type by name.
+ * Used by all authenticated users to populate dropdowns.
+ */
+export async function lookupMasterData(typeName) {
+  const result = await pool.query(
+    `SELECT v.id, v.value
+     FROM master_data_values v
+     JOIN master_data_types t ON t.id = v.type_id
+     WHERE lower(t.name) = lower($1)
+       AND t.is_active = true
+       AND v.is_active = true
+     ORDER BY v.value ASC`,
+    [typeName]
+  );
+  return result.rows.map((r) => ({ id: r.id, value: r.value }));
+}
+
 export async function deleteMasterValue(valueId) {
   const result = await pool.query("DELETE FROM master_data_values WHERE id = $1 RETURNING id", [valueId]);
 

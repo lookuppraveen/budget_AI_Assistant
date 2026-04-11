@@ -11,6 +11,11 @@ import KnowledgePanel from "./components/panels/KnowledgePanel.jsx";
 import AuditPanel from "./components/panels/AuditPanel.jsx";
 import AdminPanel from "./components/panels/AdminPanel.jsx";
 import ManualReportsPanel from "./components/panels/ManualReportsPanel.jsx";
+import BudgetRequestsPanel from "./components/panels/BudgetRequestsPanel.jsx";
+import BudgetForecastPanel from "./components/panels/BudgetForecastPanel.jsx";
+import ScheduledReportsPanel from "./components/panels/ScheduledReportsPanel.jsx";
+import { ScenarioPlanningPanel } from "./components/panels/ScenarioPlanningPanel.jsx";
+import { ExecutiveCopilotPanel } from "./components/panels/ExecutiveCopilotPanel.jsx";
 import { initialMessages, knowledgeDomains, navItems, nextHints } from "./data/uiContent.js";
 import { getConversationMessages, listConversations, logVoiceSession, sendChatMessage } from "./services/api.js";
 import { forgotPasswordApi, loginApi, resetPasswordApi, signupApi } from "./services/authApi.js";
@@ -1084,8 +1089,12 @@ export default function App() {
         <Sidebar
           activePanel={activePanel}
           navItems={allowedNavItems}
-          nextHint={nextHint}
           onPanelChange={setActivePanel}
+          onNewChat={() => {
+            setMessages(initialMessages);
+            setConversationId(null);
+            setDraft("");
+          }}
         />
 
         <section className="panel-wrap">
@@ -1151,6 +1160,26 @@ export default function App() {
               {activePanel === "email" && <EmailPanel authToken={sessionUser.token} />}
 
               {activePanel === "knowledge" && <KnowledgePanel domains={knowledgeDomains} authToken={sessionUser.token} />}
+
+              {activePanel === "budgetrequests" && (
+                <BudgetRequestsPanel authToken={sessionUser.token} user={sessionUser} />
+              )}
+
+              {activePanel === "forecast" && (
+                <BudgetForecastPanel authToken={sessionUser.token} user={sessionUser} />
+              )}
+
+              {activePanel === "scheduledreports" && (
+                <ScheduledReportsPanel authToken={sessionUser.token} user={sessionUser} />
+              )}
+
+              {activePanel === "scenarios" && (
+                <ScenarioPlanningPanel authToken={sessionUser.token} userRole={sessionUser.role} />
+              )}
+
+              {activePanel === "executive" && (
+                <ExecutiveCopilotPanel authToken={sessionUser.token} userRole={sessionUser.role} />
+              )}
 
               {activePanel === "audit" && <AuditPanel authToken={sessionUser.token} />}
 

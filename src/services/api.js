@@ -30,6 +30,13 @@ export async function sendChatMessage({ token, conversationId, message, source =
   });
 }
 
+export async function updateConversationContext(token, conversationId, context) {
+  return requestApi(`/chat/conversations/${conversationId}/context`, {
+    token,
+    options: { method: "PATCH", body: JSON.stringify(context) }
+  });
+}
+
 export async function logVoiceSession({
   token,
   conversationId,

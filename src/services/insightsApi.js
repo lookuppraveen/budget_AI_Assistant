@@ -4,6 +4,10 @@ export async function getDashboardAnalytics(token) {
   return requestApi("/analytics/dashboard", { token });
 }
 
+export async function getBudgetForecast(token) {
+  return requestApi("/analytics/budget-forecast", { token });
+}
+
 export async function getReportsSummary(token) {
   return requestApi("/reports/summary", { token });
 }

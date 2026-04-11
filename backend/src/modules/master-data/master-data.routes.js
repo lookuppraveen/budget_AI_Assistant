@@ -17,12 +17,28 @@ import {
   deleteMasterType,
   deleteMasterValue,
   listMasterData,
+  lookupMasterData,
   updateMasterType,
   updateMasterValue
 } from "./master-data.service.js";
 
 const masterDataRouter = Router();
 
+// ── Public lookup — any authenticated user, single type by name ──────────────
+masterDataRouter.get(
+  "/lookup",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { type } = req.query;
+    if (!type || typeof type !== "string" || type.trim().length === 0) {
+      return res.status(400).json({ message: "Query param 'type' is required" });
+    }
+    const values = await lookupMasterData(type.trim());
+    res.status(200).json({ values });
+  })
+);
+
+// ── Admin: list all types + values ───────────────────────────────────────────
 masterDataRouter.get(
   "/",
   authenticate,

@@ -9,14 +9,19 @@
 };
 
 export const navItems = [
-  { id: "chat", label: "AI Assistant", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
-  { id: "dashboard", label: "Dashboard", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
-  { id: "reports", label: "Reports", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
-  { id: "manualreports", label: "Manual Reports", roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only"] },
-  { id: "email", label: "Email Assistant", roles: ["Admin", "Budget Analyst", "Department Editor"] },
-  { id: "knowledge", label: "Knowledge Domains", roles: ["Admin", "Budget Analyst", "Department Editor"] },
-  { id: "audit", label: "Citations & Audit", roles: ["Admin", "Budget Analyst"] },
-  { id: "admin", label: "Admin Center", roles: ["Admin"] }
+  { id: "chat",         label: "AI Assistant",      roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only", "Cabinet", "Board Summary"] },
+  { id: "dashboard",    label: "Dashboard",          roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only", "Cabinet"] },
+  { id: "reports",      label: "Reports",            roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only", "Cabinet", "Board Summary"] },
+  { id: "manualreports",label: "Manual Reports",     roles: ["Admin", "Budget Analyst", "Department Editor", "Read Only", "Cabinet", "Board Summary"] },
+  { id: "email",        label: "Email Assistant",    roles: ["Admin", "Budget Analyst", "Department Editor"] },
+  { id: "knowledge",    label: "Knowledge Domains",  roles: ["Admin", "Budget Analyst", "Department Editor"] },
+  { id: "budgetrequests", label: "Budget Requests",    roles: ["Admin", "Budget Analyst", "Department Editor", "Cabinet"] },
+  { id: "forecast",          label: "Budget Forecast",    roles: ["Admin", "Budget Analyst", "Cabinet"] },
+  { id: "scenarios",         label: "Scenario Planning",  roles: ["Admin", "Budget Analyst", "Cabinet"] },
+  { id: "executive",         label: "Executive Copilot",  roles: ["Admin", "Budget Analyst", "Cabinet"] },
+  { id: "scheduledreports", label: "Scheduled Reports",  roles: ["Admin", "Budget Analyst"] },
+  { id: "audit",        label: "Citations & Audit",  roles: ["Admin", "Budget Analyst", "Cabinet"] },
+  { id: "admin",        label: "Admin Center",       roles: ["Admin"] }
 ];
 
 export const knowledgeDomains = [

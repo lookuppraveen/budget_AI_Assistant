@@ -4,11 +4,13 @@ import { env } from "./config/env.js";
 import { startRetrievalScheduler } from "./modules/retrieval/retrieval.service.js";
 import { startReportScheduler } from "./modules/reports/reports.service.js";
 import { startEmailResponderScheduler, stopEmailResponderScheduler } from "./modules/email/email-responder.service.js";
+import { startScheduler, stopScheduler } from "./modules/scheduler/scheduler.service.js";
 
 async function startServer() {
   await testDbConnection();
   startRetrievalScheduler();
   await startReportScheduler();
+  await startScheduler();
   if (env.emailResponderEnabled) {
     startEmailResponderScheduler(env.emailResponderIntervalMs);
   }
@@ -19,6 +21,7 @@ async function startServer() {
 
   const shutdown = async () => {
     stopEmailResponderScheduler();
+    stopScheduler();
     server.close(async () => {
       await pool.end();
       process.exit(0);

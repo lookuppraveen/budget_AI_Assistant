@@ -1,6 +1,6 @@
 import { pool } from "../../config/db.js";
 
-const systemRoles = new Set(["Admin", "Budget Analyst", "Department Editor", "Read Only"]);
+const systemRoles = new Set(["Admin", "Budget Analyst", "Department Editor", "Read Only", "Cabinet", "Board Summary"]);
 let rolesColumnsCache = null;
 
 function isSystemRole(roleName) {

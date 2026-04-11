@@ -36,6 +36,32 @@ export const createChatMessageSchema = z.object({
   query: z.object({})
 });
 
+// Budget context fields that scope AI answers to a specific department/fund/year
+export const updateConversationContextSchema = z.object({
+  body: z.object({
+    department: z.string().max(120).optional(),
+    fundType: z.string().max(80).optional(),
+    fiscalYear: z.string().max(20).optional(),
+    topic: z.string().max(200).optional()
+  }),
+  params: z.object({
+    id: z.string().uuid("Invalid conversation id")
+  }),
+  query: z.object({})
+});
+
+// Review queue item update (budget office resolves an escalation)
+export const updateReviewQueueSchema = z.object({
+  body: z.object({
+    status: z.enum(["reviewed", "resolved", "dismissed"]),
+    reviewerNotes: z.string().max(2000).optional()
+  }),
+  params: z.object({
+    id: z.string().uuid("Invalid review queue item id")
+  }),
+  query: z.object({})
+});
+
 export const createVoiceLogSchema = z.object({
   body: z.object({
     conversationId: z.string().uuid("Invalid conversation id").optional(),

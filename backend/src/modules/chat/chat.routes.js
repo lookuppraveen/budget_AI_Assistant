@@ -7,16 +7,25 @@ import {
   createChatMessageSchema,
   createConversationSchema,
   createVoiceLogSchema,
-  listConversationsQuerySchema
+  listConversationsQuerySchema,
+  updateConversationContextSchema,
+  updateReviewQueueSchema
 } from "./chat.schemas.js";
+import { authorize } from "../../middleware/authorize.js";
 import {
   createChatTurn,
   createConversation,
   createVoiceLog,
   deleteConversation,
   getConversationMessages,
+  getConversationContext,
   listConversations,
-  streamChatTurn
+  listReviewQueue,
+  saveFeedback,
+  getMessageExplanation,
+  streamChatTurn,
+  updateConversationContext,
+  updateReviewQueueItem
 } from "./chat.service.js";
 
 const chatRouter = Router();
@@ -210,6 +219,84 @@ chatRouter.post(
   asyncHandler(async (req, res) => {
     const voiceLog = await createVoiceLog(req.user.id, req.validated.body);
     res.status(201).json({ voiceLog });
+  })
+);
+
+// ── Budget context endpoints ─────────────────────────────────────────────────
+
+chatRouter.get(
+  "/conversations/:id/context",
+  authenticate,
+  validate(conversationParamsSchema),
+  asyncHandler(async (req, res) => {
+    const context = await getConversationContext(req.validated.params.id, req.user.id);
+    res.status(200).json({ context });
+  })
+);
+
+chatRouter.patch(
+  "/conversations/:id/context",
+  authenticate,
+  validate(updateConversationContextSchema),
+  asyncHandler(async (req, res) => {
+    const conversation = await updateConversationContext(
+      req.validated.params.id,
+      req.user.id,
+      req.validated.body
+    );
+    res.status(200).json({ conversation });
+  })
+);
+
+// ── Message feedback (thumbs up/down) ────────────────────────────────────────
+
+chatRouter.post(
+  "/messages/:id/feedback",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const feedback = await saveFeedback(req.params.id, req.user.id, req.body);
+    res.status(200).json({ feedback });
+  })
+);
+
+// ── "Show me why" — per-message explanation ──────────────────────────────────
+
+chatRouter.get(
+  "/messages/:id/explain",
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const explanation = await getMessageExplanation(req.params.id, req.user.id);
+    res.status(200).json({ explanation });
+  })
+);
+
+// ── Human review queue endpoints (Budget Analyst + Admin) ────────────────────
+
+chatRouter.get(
+  "/review-queue",
+  authenticate,
+  authorize("Admin", "Budget Analyst"),
+  asyncHandler(async (req, res) => {
+    const status = req.query.status || "pending";
+    const limit  = Math.min(Number(req.query.limit  || 50), 100);
+    const offset = Number(req.query.offset || 0);
+    const result = await listReviewQueue({ status, limit, offset });
+    res.status(200).json(result);
+  })
+);
+
+chatRouter.patch(
+  "/review-queue/:id",
+  authenticate,
+  authorize("Admin", "Budget Analyst"),
+  validate(updateReviewQueueSchema),
+  asyncHandler(async (req, res) => {
+    const item = await updateReviewQueueItem(
+      req.validated.params.id,
+      req.user.id,
+      req.validated.body
+    );
+    res.status(200).json({ item });
   })
 );
 

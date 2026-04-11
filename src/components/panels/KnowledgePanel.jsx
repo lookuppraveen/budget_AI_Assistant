@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useMasterData } from "../../hooks/useMasterData.js";
 import { getSharePointConfig, syncSharePoint, testSharePointConnection } from "../../services/sharepointApi.js";
 import { getDepartments, reindexDocumentChunks } from "../../services/adminApi.js";
 import { deleteDocument, downloadDocument, getDocuments, ingestDocumentUrl, reuploadDocument, searchKnowledge, uploadDocumentFiles } from "../../services/documentsApi.js";
@@ -14,7 +15,9 @@ const tabs = [
   { id: "search", label: "Search Knowledge" }
 ];
 
-export default function KnowledgePanel({ domains, authToken }) {
+export default function KnowledgePanel({ domains: domainsFallback, authToken }) {
+  const { values: domains } = useMasterData(authToken, "Knowledge Domain", domainsFallback);
+
   const [activeTab, setActiveTab] = useState("upload");
   const [uploadedItems, setUploadedItems] = useState([]);
   const [publicLink, setPublicLink] = useState("");

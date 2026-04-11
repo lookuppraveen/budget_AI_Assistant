@@ -18,6 +18,7 @@ function toMessagePayload(row) {
     role: row.role,
     source: row.source,
     text: row.content,
+    agentType: row.agent_type || null,
     citations: Array.isArray(row.metadata?.citations) ? row.metadata.citations : [],
     suggestions: Array.isArray(row.metadata?.suggestions) ? row.metadata.suggestions : [],
     createdAt: row.created_at
@@ -43,6 +44,55 @@ function parseSuggestions(rawText = "") {
     return { cleanText: cleanText || rawText.trim(), suggestions };
   } catch {
     return { cleanText: rawText.trim(), suggestions: [] };
+  }
+}
+
+// ── Drafting mode detection ───────────────────────────────────────────────────
+// Returns true when the user message is clearly a drafting/writing request
+const DRAFT_PATTERNS = [
+  /\bdraft\b/i,
+  /\bwrite\b/i,
+  /\bcompose\b/i,
+  /\bhelp me write\b/i,
+  /\bprepare\b.*\b(email|letter|memo|summary|justification|response|reply|note)\b/i,
+  /\bcreate\b.*\b(email|letter|memo|summary|justification|response|reply|note)\b/i,
+  /\bgenerate\b.*\b(email|letter|memo|summary|justification|response|reply|note)\b/i,
+  /\b(email|letter|memo|justification|response|reply)\b.*\bfor\b/i
+];
+
+function isDraftRequest(message) {
+  return DRAFT_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+// ── Human escalation ──────────────────────────────────────────────────────────
+const ESCALATION_CONFIDENCE_THRESHOLD = 0.5;
+
+async function escalateToHumanReview({ conversationId, userMessageId, assistantMessageId, userId, userQuery, aiResponse, citations }) {
+  try {
+    const topScore = citations?.[0]?.score ?? 0;
+    if (topScore >= ESCALATION_CONFIDENCE_THRESHOLD) return; // no escalation needed
+
+    const topCitation = citations?.[0]?.title || null;
+
+    await pool.query(
+      `INSERT INTO human_review_queue
+         (conversation_id, user_message_id, assistant_message_id, user_id,
+          user_query, ai_response, confidence_score, top_citation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        conversationId,
+        userMessageId,
+        assistantMessageId,
+        userId,
+        userQuery.slice(0, 2000),
+        aiResponse ? aiResponse.slice(0, 4000) : null,
+        topScore,
+        topCitation
+      ]
+    );
+  } catch (err) {
+    // Escalation failure must never crash the chat turn
+    console.error("Failed to escalate low-confidence response to review queue:", err.message);
   }
 }
 
@@ -104,8 +154,96 @@ function buildFallbackResponse(message, citations) {
   return `Guidance-only response from approved knowledge (${domainList}): I can provide policy interpretation and process support, but I do not execute live approvals or transactions. Start with "${topSource.title}" and related cited sources below.`;
 }
 
+// ── Multi-agent classification ────────────────────────────────────────────────
+
+const AGENT_PATTERNS = {
+  policy: [
+    /\bpolic(y|ies)\b/i, /\bguideline/i, /\bcompliance\b/i, /\bregulation\b/i,
+    /\baccreditation\b/i, /\bmandate\b/i, /\brule\b/i, /\bprocedure\b/i,
+    /\bapproval process\b/i, /\bwhat are the rules\b/i
+  ],
+  analyst: [
+    /\bcompare\b/i, /\banalyze\b/i, /\banalysis\b/i, /\btrend\b/i,
+    /\bvariance\b/i, /\bbreakdown\b/i, /\bbenchmark\b/i, /\bspending\b/i,
+    /\bbudget request(s)?\b/i, /\bhow much\b/i, /\bhistor(y|ical)\b/i
+  ],
+  forecasting: [
+    /\bforecast\b/i, /\bproject(ion|ed)?\b/i, /\bscenario\b/i,
+    /\bif enrollment\b/i, /\bif state funding\b/i, /\bdeficit\b/i, /\bsurplus\b/i,
+    /\bwhat (if|would happen)\b/i, /\bfuture\b/i, /\bnext year\b/i
+  ],
+  board: [
+    /\bboard\b/i, /\bcabinet\b/i, /\bexecutive (summary|brief)\b/i,
+    /\bpresent(ation)?\b/i, /\btalking point/i, /\bsummariz(e|ing)\b/i,
+    /\bhigh.?level\b/i, /\bpresident\b/i, /\bstakeholder\b/i
+  ],
+  drafting: DRAFT_PATTERNS
+};
+
+function classifyQuery(message) {
+  for (const [agent, patterns] of Object.entries(AGENT_PATTERNS)) {
+    if (patterns.some((p) => p.test(message))) return agent;
+  }
+  return "general";
+}
+
+// Agent-specific system prompt additions (merged into base prompt)
+const AGENT_SYSTEM_ADDONS = {
+  policy: `
+AGENT MODE: Policy Specialist
+- You are answering as a policy and compliance expert.
+- Lead with the specific rule, regulation, or policy that applies.
+- Cite the exact policy document name and section when available.
+- Flag compliance risks or exceptions clearly.
+- Avoid speculative interpretation — if the policy is silent, say so.`,
+
+  analyst: `
+AGENT MODE: Budget Analyst
+- You are answering as a data-driven budget analyst.
+- Use numbers, percentages, and comparisons from the knowledge sources where available.
+- Structure your answer with clear data points before interpretation.
+- Highlight trends, anomalies, or variances when relevant.
+- Flag data gaps or assumptions explicitly.`,
+
+  forecasting: `
+AGENT MODE: Forecasting Specialist
+- You are answering as a financial forecasting expert.
+- Clearly state assumptions behind any projections.
+- Use scenario framing: best-case, expected, constrained when helpful.
+- Quantify uncertainty — avoid presenting forecasts as certainties.
+- Reference scenario planning data or historical trends from knowledge sources.`,
+
+  board: `
+AGENT MODE: Executive Communications
+- You are preparing content for board/cabinet-level audiences.
+- Use concise, executive language — no jargon, no technical weeds.
+- Lead with the headline: what decision is needed, what is the financial impact.
+- Structure as: situation → implication → recommended action.
+- Keep to 3–5 key points maximum. Bullet points are appropriate here.`,
+
+  drafting: `
+AGENT MODE: Document Drafter
+- Produce a complete, polished draft ready for use.
+- Do not write a skeleton or outline — write the actual document.
+- Use formal professional language appropriate for institutional communications.
+- After the draft, add a brief Notes: section (2–3 bullets) with key assumptions.`,
+
+  general: ""
+};
+
+// ── Budget context note builder ───────────────────────────────────────────────
+function buildContextNote(ctx = {}) {
+  if (!ctx || typeof ctx !== "object") return "";
+  const parts = [];
+  if (ctx.department) parts.push(`Department: ${ctx.department}`);
+  if (ctx.fundType)   parts.push(`Fund Type: ${ctx.fundType}`);
+  if (ctx.fiscalYear) parts.push(`Fiscal Year: ${ctx.fiscalYear}`);
+  if (ctx.topic)      parts.push(`Current Topic: ${ctx.topic}`);
+  return parts.join(" | ");
+}
+
 // Shared: build the system prompt and message array for OpenAI
-function buildOpenAiMessages(message, chunks, history, source) {
+function buildOpenAiMessages(message, chunks, history, source, budgetContext = {}, agentType = "general") {
   const grouped = new Map();
   for (const chunk of chunks) {
     if (!grouped.has(chunk.title)) grouped.set(chunk.title, []);
@@ -126,6 +264,37 @@ function buildOpenAiMessages(message, chunks, history, source) {
         )
         .join("\n\n---\n\n")
     : "No approved knowledge found for this query.";
+
+  // ── Draft mode system prompt ─────────────────────────────────────────────
+  const draftMode = isDraftRequest(message);
+  if (draftMode) {
+    const contextNote = buildContextNote(budgetContext);
+    const draftSystemPrompt = `You are a professional Budget Assistant helping staff draft formal budget communications for STLCC.
+
+Your job is to produce a complete, ready-to-use draft based on the user's request and the approved knowledge sources below.
+
+DRAFTING RULES:
+- Produce a full, polished draft — not a skeleton or outline.
+- Use formal, professional language appropriate for budget communications.
+- Structure the draft clearly: opening/subject, body paragraphs, closing.
+- Weave in relevant policy references naturally (e.g. "Per the FY26 Budget Guidelines...").
+- If the sources contain specific amounts, procedures, or policy language, use them accurately.
+- Do not invent figures or policies not found in the sources.
+- After the draft, add a brief "Notes:" section (2–3 bullet points) explaining key choices and suggesting the user verify any figures against live data.${contextNote ? `\n\nACTIVE BUDGET CONTEXT:\n${contextNote}` : ""}
+
+APPROVED KNOWLEDGE SOURCES:
+${knowledgeContext}`;
+
+    const messages = [{ role: "system", content: draftSystemPrompt }];
+    for (const turn of history.slice(-6)) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+    messages.push({ role: "user", content: message });
+    return messages;
+  }
+
+  // ── Budget context note for regular answers ──────────────────────────────
+  const contextNote = buildContextNote(budgetContext);
 
   const voiceGuidance = source === "voice"
     ? `\n- This response will be spoken aloud by text-to-speech so it must sound like natural, friendly conversation — not a written document.
@@ -150,14 +319,16 @@ After your answer, append exactly this JSON block on a new line — no explanati
 - Do NOT include this JSON inside your prose — it must appear only at the very end.`
     : "";
 
-  const systemPrompt = `You are a warm, knowledgeable Budget Assistant — think of yourself as a helpful colleague who happens to know all the budget policies inside out. Your job is to help staff understand policies, procedures, and guidelines in a friendly and approachable way.
+  const agentAddon = AGENT_SYSTEM_ADDONS[agentType] || "";
+
+  const systemPrompt = `You are a warm, knowledgeable Budget Assistant — think of yourself as a helpful colleague who happens to know all the budget policies inside out. Your job is to help staff understand policies, procedures, and guidelines in a friendly and approachable way.${agentAddon}${contextNote ? `\n\nACTIVE BUDGET CONTEXT (scope your answer to this context when relevant):\n${contextNote}` : ""}
 
 PERSONALITY:
 - Speak naturally and conversationally, like a trusted colleague — not like a formal document or an IVR system.
 - Use contractions (you'll, I'd, that's, here's) to sound human.
 - Keep your tone warm and supportive. Avoid stiff corporate language.
 - Answer the question first, then give context — don't bury the answer.
-- Give thorough, detailed answers. Don't be terse — if the sources contain useful detail, share it. Think of each answer as a mini briefing for the person asking.
+- Match your response length to the complexity of the question. For simple or factual questions, 2–4 sentences is ideal. For complex questions that genuinely require detail, answer fully — but don't pad, repeat, or over-explain beyond what was asked.
 - When multiple sources are relevant, synthesize them together into a cohesive narrative rather than listing them separately.
 
 RULES:
@@ -181,10 +352,10 @@ ${knowledgeContext}`;
 }
 
 // Non-streaming (kept for backward compatibility)
-async function generateLlmResponse(message, chunks, citations, history, source = "text") {
+async function generateLlmResponse(message, chunks, citations, history, source = "text", budgetContext = {}, agentType = "general") {
   if (!env.openAiApiKey) return { text: buildFallbackResponse(message, citations), suggestions: [] };
   try {
-    const messages = buildOpenAiMessages(message, chunks, history, source);
+    const messages = buildOpenAiMessages(message, chunks, history, source, budgetContext, agentType);
     const completion = await getOpenAiClient().chat.completions.create({
       model: env.openAiChatModel,
       messages,
@@ -202,14 +373,14 @@ async function generateLlmResponse(message, chunks, citations, history, source =
 
 // Streaming — calls onToken(chunk) for each visible token, returns { text, suggestions }
 // Buffers the JSON suggestions tail so it never appears in the streamed UI output.
-async function streamLlmResponse(message, chunks, citations, history, source, onToken) {
+async function streamLlmResponse(message, chunks, citations, history, source, onToken, budgetContext = {}, agentType = "general") {
   if (!env.openAiApiKey) {
     const fallback = buildFallbackResponse(message, citations);
     onToken(fallback);
     return { text: fallback, suggestions: [] };
   }
   try {
-    const messages = buildOpenAiMessages(message, chunks, history, source);
+    const messages = buildOpenAiMessages(message, chunks, history, source, budgetContext, agentType);
     const stream = await getOpenAiClient().chat.completions.create({
       model: env.openAiChatModel,
       messages,
@@ -284,7 +455,7 @@ export async function getConversationMessages(conversationId, userId) {
     await getOwnedConversation(client, conversationId, userId);
 
     const result = await client.query(
-      `SELECT id, role, source, content, metadata, created_at
+      `SELECT id, role, source, content, metadata, agent_type, created_at
        FROM chat_messages
        WHERE conversation_id = $1
        ORDER BY created_at ASC`,
@@ -304,9 +475,16 @@ export async function createChatTurn(userId, { conversationId, message, source }
     await client.query("BEGIN");
 
     let resolvedConversationId = conversationId;
+    let budgetContext = {};
 
     if (resolvedConversationId) {
       await getOwnedConversation(client, resolvedConversationId, userId);
+      // Load stored budget context for this conversation
+      const ctxRes = await client.query(
+        `SELECT budget_context FROM chat_conversations WHERE id = $1`,
+        [resolvedConversationId]
+      );
+      budgetContext = ctxRes.rows[0]?.budget_context || {};
     } else {
       const conversationResult = await client.query(
         `INSERT INTO chat_conversations (user_id, title)
@@ -341,12 +519,13 @@ export async function createChatTurn(userId, { conversationId, message, source }
       ({ citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId));
     }
 
-    const { text: assistantText, suggestions } = await generateLlmResponse(message.trim(), chunks, citations, history, source);
+    const agentType = classifyQuery(message.trim());
+    const { text: assistantText, suggestions } = await generateLlmResponse(message.trim(), chunks, citations, history, source, budgetContext, agentType);
 
     const assistantMessageResult = await client.query(
-      `INSERT INTO chat_messages (conversation_id, role, source, content, metadata)
-       VALUES ($1, 'assistant', 'text', $2, $3::jsonb)
-       RETURNING id, role, source, content, metadata, created_at`,
+      `INSERT INTO chat_messages (conversation_id, role, source, content, metadata, agent_type)
+       VALUES ($1, 'assistant', 'text', $2, $3::jsonb, $4)
+       RETURNING id, role, source, content, metadata, agent_type, created_at`,
       [
         resolvedConversationId,
         assistantText,
@@ -361,7 +540,8 @@ export async function createChatTurn(userId, { conversationId, message, source }
             excerpt: citation.excerpt,
             score: citation.score
           }))
-        })
+        }),
+        agentType
       ]
     );
 
@@ -381,6 +561,17 @@ export async function createChatTurn(userId, { conversationId, message, source }
     );
 
     await client.query("COMMIT");
+
+    // Escalate to human review if confidence is low (runs after commit, non-blocking)
+    await escalateToHumanReview({
+      conversationId: resolvedConversationId,
+      userMessageId: userMessageResult.rows[0].id,
+      assistantMessageId: assistantMessageResult.rows[0].id,
+      userId,
+      userQuery: message.trim(),
+      aiResponse: assistantText,
+      citations
+    });
 
     return {
       conversation: conversationResult.rows[0],
@@ -404,6 +595,7 @@ export async function streamChatTurn(userId, { conversationId, message, source }
   let resolvedConversationId = conversationId;
   let userMessageRow;
   let history;
+  let budgetContext = {};
 
   {
     const client = await pool.connect();
@@ -412,6 +604,12 @@ export async function streamChatTurn(userId, { conversationId, message, source }
 
       if (resolvedConversationId) {
         await getOwnedConversation(client, resolvedConversationId, userId);
+        // Load stored budget context
+        const ctxRes = await client.query(
+          `SELECT budget_context FROM chat_conversations WHERE id = $1`,
+          [resolvedConversationId]
+        );
+        budgetContext = ctxRes.rows[0]?.budget_context || {};
       } else {
         const r = await client.query(
           `INSERT INTO chat_conversations (user_id, title) VALUES ($1, $2) RETURNING id`,
@@ -450,10 +648,11 @@ export async function streamChatTurn(userId, { conversationId, message, source }
     ({ citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId));
   }
 
+  const agentType = classifyQuery(message.trim());
   onCitations(citations);
 
   // ── Phase 3: stream OpenAI tokens ────────────────────────────────────────
-  const { text: assistantText, suggestions } = await streamLlmResponse(message.trim(), chunks, citations, history, source, onToken);
+  const { text: assistantText, suggestions } = await streamLlmResponse(message.trim(), chunks, citations, history, source, onToken, budgetContext, agentType);
 
   // ── Phase 4: save assistant message to DB ────────────────────────────────
   {
@@ -462,9 +661,9 @@ export async function streamChatTurn(userId, { conversationId, message, source }
       await client.query("BEGIN");
 
       const assistantMsg = await client.query(
-        `INSERT INTO chat_messages (conversation_id, role, source, content, metadata)
-         VALUES ($1, 'assistant', 'text', $2, $3::jsonb)
-         RETURNING id, role, source, content, metadata, created_at`,
+        `INSERT INTO chat_messages (conversation_id, role, source, content, metadata, agent_type)
+         VALUES ($1, 'assistant', 'text', $2, $3::jsonb, $4)
+         RETURNING id, role, source, content, metadata, agent_type, created_at`,
         [
           resolvedConversationId,
           assistantText,
@@ -475,7 +674,8 @@ export async function streamChatTurn(userId, { conversationId, message, source }
               sourceType: c.source_type, department: c.department,
               excerpt: c.excerpt, score: c.score
             }))
-          })
+          }),
+          agentType
         ]
       );
 
@@ -496,6 +696,17 @@ export async function streamChatTurn(userId, { conversationId, message, source }
         userMessage: toMessagePayload(userMessageRow),
         assistantMessage: toMessagePayload(assistantMsg.rows[0])
       });
+
+      // Escalate to human review if confidence is low (fire-and-forget)
+      await escalateToHumanReview({
+        conversationId: resolvedConversationId,
+        userMessageId: userMessageRow.id,
+        assistantMessageId: assistantMsg.rows[0].id,
+        userId,
+        userQuery: message.trim(),
+        aiResponse: assistantText,
+        citations
+      });
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;
@@ -503,6 +714,87 @@ export async function streamChatTurn(userId, { conversationId, message, source }
       client.release();
     }
   }
+}
+
+// ── Conversation budget context management ────────────────────────────────────
+
+export async function updateConversationContext(conversationId, userId, context) {
+  const client = await pool.connect();
+  try {
+    await getOwnedConversation(client, conversationId, userId);
+    const result = await client.query(
+      `UPDATE chat_conversations
+       SET budget_context = $1::jsonb, updated_at = now()
+       WHERE id = $2
+       RETURNING id, title, budget_context, last_message_at, created_at, updated_at`,
+      [JSON.stringify(context), conversationId]
+    );
+    return result.rows[0];
+  } finally {
+    client.release();
+  }
+}
+
+export async function getConversationContext(conversationId, userId) {
+  const client = await pool.connect();
+  try {
+    await getOwnedConversation(client, conversationId, userId);
+    const result = await client.query(
+      `SELECT budget_context FROM chat_conversations WHERE id = $1`,
+      [conversationId]
+    );
+    return result.rows[0]?.budget_context || {};
+  } finally {
+    client.release();
+  }
+}
+
+// ── Human review queue management ────────────────────────────────────────────
+
+export async function listReviewQueue({ status = "pending", limit = 50, offset = 0 } = {}) {
+  const result = await pool.query(
+    `SELECT
+       q.id, q.user_query, q.ai_response, q.confidence_score, q.top_citation,
+       q.status, q.reviewer_notes, q.created_at, q.reviewed_at,
+       u.name AS user_name, u.email AS user_email,
+       rv.name AS reviewer_name
+     FROM human_review_queue q
+     LEFT JOIN users u  ON u.id  = q.user_id
+     LEFT JOIN users rv ON rv.id = q.reviewed_by
+     WHERE q.status = $1
+     ORDER BY q.created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [status, limit, offset]
+  );
+
+  const countRes = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM human_review_queue WHERE status = $1`,
+    [status]
+  );
+
+  return { items: result.rows, total: countRes.rows[0].total };
+}
+
+export async function updateReviewQueueItem(itemId, reviewerId, { status, reviewerNotes }) {
+  const result = await pool.query(
+    `UPDATE human_review_queue
+     SET status = $1,
+         reviewer_notes = COALESCE($2, reviewer_notes),
+         reviewed_by = $3,
+         reviewed_at = now(),
+         updated_at = now()
+     WHERE id = $4
+     RETURNING id, status, reviewer_notes, reviewed_at`,
+    [status, reviewerNotes || null, reviewerId, itemId]
+  );
+
+  if (result.rowCount === 0) {
+    const err = new Error("Review queue item not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  return result.rows[0];
 }
 
 export async function deleteConversation(conversationId, userId) {
@@ -516,6 +808,70 @@ export async function deleteConversation(conversationId, userId) {
     error.statusCode = 404;
     throw error;
   }
+}
+
+// ── Chat feedback (continuous learning loop) ──────────────────────────────────
+
+export async function saveFeedback(messageId, userId, { rating, correction, feedbackType }) {
+  if (![1, -1].includes(rating)) {
+    throw Object.assign(new Error("rating must be 1 (helpful) or -1 (not helpful)"), { statusCode: 400 });
+  }
+
+  // Verify message exists
+  const msgRes = await pool.query(`SELECT id FROM chat_messages WHERE id = $1`, [messageId]);
+  if (!msgRes.rowCount) throw Object.assign(new Error("Message not found"), { statusCode: 404 });
+
+  const res = await pool.query(
+    `INSERT INTO chat_feedback (message_id, user_id, rating, correction, feedback_type)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (message_id, user_id) DO UPDATE
+       SET rating = EXCLUDED.rating,
+           correction = EXCLUDED.correction,
+           feedback_type = EXCLUDED.feedback_type
+     RETURNING id, message_id, user_id, rating, correction, feedback_type, created_at`,
+    [messageId, userId, rating, correction || null, feedbackType || null]
+  );
+
+  return res.rows[0];
+}
+
+// ── "Show me why" — per-answer explanation ────────────────────────────────────
+
+export async function getMessageExplanation(messageId, userId) {
+  // Any authenticated user can request explanation — no ownership check needed
+  const res = await pool.query(
+    `SELECT id, role, content, metadata, agent_type, created_at
+     FROM chat_messages WHERE id = $1`,
+    [messageId]
+  );
+  if (!res.rowCount) throw Object.assign(new Error("Message not found"), { statusCode: 404 });
+
+  const msg = res.rows[0];
+  const citations = msg.metadata?.citations || [];
+  const suggestions = msg.metadata?.suggestions || [];
+
+  // Agent type label map
+  const agentLabels = {
+    general:     "General Budget Assistant",
+    policy:      "Policy Specialist Agent",
+    analyst:     "Budget Analyst Agent",
+    forecasting: "Forecasting Specialist Agent",
+    board:       "Executive Communications Agent",
+    drafting:    "Document Drafting Agent",
+  };
+
+  return {
+    messageId: msg.id,
+    role:      msg.role,
+    agentType: msg.agent_type || "general",
+    agentLabel:agentLabels[msg.agent_type] || agentLabels.general,
+    citations,
+    suggestions,
+    explanation: citations.length
+      ? `This answer was generated by the ${agentLabels[msg.agent_type] || agentLabels.general} using ${citations.length} approved knowledge source(s). The top source was "${citations[0]?.title}" with ${((citations[0]?.score || 0) * 100).toFixed(0)}% relevance.`
+      : "This answer was generated without matching approved knowledge sources. No citations available.",
+    topSourceExcerpt: citations[0]?.excerpt || null,
+  };
 }
 
 export async function createVoiceLog(userId, { conversationId, eventType, direction, transcript, status, durationMs, metadata }) {

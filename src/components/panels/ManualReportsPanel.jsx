@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useMasterData } from "../../hooks/useMasterData.js";
 import { getDepartments } from "../../services/adminApi.js";
 import {
   deleteManualReport,
@@ -17,19 +18,8 @@ const REPORT_TYPES = [
   "Custom Report"
 ];
 
-const DOMAINS = [
-  "Budget Policies",
-  "Budget Procedures",
-  "Historical Budgets",
-  "Budget Training Materials",
-  "Board Presentations",
-  "Department Requests",
-  "Budget Manager Correspondence",
-  "Calendar & Deadlines",
-  "Revenue Assumptions"
-];
-
-const FISCAL_YEARS = ["FY27", "FY26", "FY25", "FY24", "FY23"];
+const FB_DOMAINS      = ["Budget Policies","Budget Procedures","Historical Budgets","Budget Training Materials","Board Presentations","Department Requests","Budget Manager Correspondence","Calendar & Deadlines","Revenue Assumptions"];
+const FB_FISCAL_YEARS = ["FY27", "FY26", "FY25", "FY24", "FY23"];
 
 const STATUS_COLOR = {
   Ready: "#16a34a",
@@ -147,6 +137,9 @@ function buildScopeSummary(form, departments) {
 }
 
 export default function ManualReportsPanel({ authToken, userRole, userDepartmentId }) {
+  const { values: FISCAL_YEARS } = useMasterData(authToken, "Fiscal Year",      FB_FISCAL_YEARS);
+  const { values: DOMAINS       } = useMasterData(authToken, "Knowledge Domain", FB_DOMAINS);
+
   const [form, setForm] = useState(defaultForm);
   const [departments, setDepartments] = useState([]);
   const [generating, setGenerating] = useState(false);

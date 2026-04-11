@@ -1,26 +1,32 @@
 import { useEffect, useState } from "react";
 import { getDashboardAnalytics } from "../../services/insightsApi.js";
+import { getProactiveAlerts } from "../../services/scenariosApi.js";
 
 // ── Static role config ────────────────────────────────────────────────────────
 
 const QUICK_ACTIONS = {
   Admin: [
+    { label: "Budget Requests",   icon: "📋", panel: "budgetrequests",  desc: "Review, score, and approve budget requests" },
+    { label: "Budget Forecast",   icon: "📈", panel: "forecast",        desc: "Multi-year trends and spending forecasts" },
+    { label: "Scheduled Reports", icon: "📅", panel: "scheduledreports",desc: "Automate report email delivery to stakeholders" },
     { label: "Manage Users", icon: "👥", panel: "admin", desc: "Add, edit, assign roles & departments" },
     { label: "Knowledge Domains", icon: "📚", panel: "knowledge", desc: "Upload and manage budget documents" },
     { label: "Citations & Audit", icon: "🔍", panel: "audit", desc: "Review AI answer quality & confidence" },
     { label: "Email Assistant", icon: "📧", panel: "email", desc: "Configure and process budget emails" },
-    { label: "Run Reports", icon: "📊", panel: "reports", desc: "Generate governance & exec reports" },
     { label: "AI Assistant", icon: "💬", panel: "chat", desc: "Ask any budget question instantly" },
   ],
   "Budget Analyst": [
+    { label: "Budget Requests",   icon: "📋", panel: "budgetrequests",  desc: "Analyze and review submitted budget requests" },
+    { label: "Budget Forecast",   icon: "📈", panel: "forecast",        desc: "View multi-year spending trends and pipeline" },
+    { label: "Scheduled Reports", icon: "📅", panel: "scheduledreports",desc: "Configure automated report email delivery" },
     { label: "AI Assistant", icon: "💬", panel: "chat", desc: "Get instant AI-powered budget answers" },
     { label: "Run Reports", icon: "📊", panel: "reports", desc: "Generate scheduled budget reports" },
     { label: "Manual Reports", icon: "📝", panel: "manualreports", desc: "Build custom budget reports" },
     { label: "Citations & Audit", icon: "🔍", panel: "audit", desc: "Verify AI answers with source citations" },
     { label: "Knowledge Domains", icon: "📚", panel: "knowledge", desc: "Browse policy & procedure documents" },
-    { label: "Email Assistant", icon: "📧", panel: "email", desc: "Analyze and draft budget emails" },
   ],
   "Department Editor": [
+    { label: "Budget Requests", icon: "📋", panel: "budgetrequests", desc: "Submit and track your department budget requests" },
     { label: "AI Assistant", icon: "💬", panel: "chat", desc: "Ask budget questions for your department" },
     { label: "Knowledge Domains", icon: "📚", panel: "knowledge", desc: "Upload and manage your dept documents" },
     { label: "Email Assistant", icon: "📧", panel: "email", desc: "Process and respond to budget emails" },
@@ -32,6 +38,19 @@ const QUICK_ACTIONS = {
     { label: "View Reports", icon: "📊", panel: "reports", desc: "Access available budget reports" },
     { label: "Manual Reports", icon: "📝", panel: "manualreports", desc: "View custom budget reports" },
   ],
+  Cabinet: [
+    { label: "Budget Requests", icon: "📋", panel: "budgetrequests", desc: "View and review budget request summaries" },
+    { label: "Budget Forecast", icon: "📈", panel: "forecast",       desc: "Executive view of budget trends and forecasts" },
+    { label: "AI Assistant", icon: "💬", panel: "chat", desc: "Ask budget questions and get instant answers" },
+    { label: "Manual Reports", icon: "📝", panel: "manualreports", desc: "Generate executive budget summaries" },
+    { label: "View Reports", icon: "📊", panel: "reports", desc: "Access governance and executive reports" },
+    { label: "Citations & Audit", icon: "🔍", panel: "audit", desc: "Review AI answer quality and sources" },
+  ],
+  "Board Summary": [
+    { label: "AI Assistant", icon: "💬", panel: "chat", desc: "Ask budget questions" },
+    { label: "Manual Reports", icon: "📝", panel: "manualreports", desc: "View board-ready budget summaries" },
+    { label: "View Reports", icon: "📊", panel: "reports", desc: "Access board presentation reports" },
+  ],
 };
 
 const ROLE_HEADLINE = {
@@ -39,6 +58,8 @@ const ROLE_HEADLINE = {
   "Budget Analyst": "Budget Analysis & Reporting",
   "Department Editor": "Department Budget Management",
   "Read Only": "Budget Information Access",
+  Cabinet: "Executive Budget Overview",
+  "Board Summary": "Board-Level Budget Access",
 };
 
 const ROLE_DESCRIPTION = {
@@ -46,6 +67,8 @@ const ROLE_DESCRIPTION = {
   "Budget Analyst": "Analyze budget data, generate reports, audit AI performance, and manage inquiries.",
   "Department Editor": "Upload department documents, handle budget queries, and create departmental reports.",
   "Read Only": "View budget reports, ask questions, and access current budget information.",
+  Cabinet: "Review executive summaries, ask strategic budget questions, and access audit-ready reports.",
+  "Board Summary": "Access board-ready budget summaries, reports, and high-level AI-assisted answers.",
 };
 
 const BUDGET_CALENDAR = [
@@ -113,6 +136,7 @@ function buildKpis(role, data) {
 export default function DashboardPanel({ authToken, user, onNavigate }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [proactiveAlerts, setProactiveAlerts] = useState([]);
 
   const role = user?.role || "Read Only";
   const email = user?.email || "";
@@ -136,10 +160,20 @@ export default function DashboardPanel({ authToken, user, onNavigate }) {
     else setLoading(false);
   }, [authToken]);
 
+  // Load proactive alerts for Admin + Budget Analyst
+  const roleForAlerts = user?.role || "";
+  useEffect(() => {
+    if (!authToken || !["Admin", "Budget Analyst", "Cabinet"].includes(roleForAlerts)) return;
+    getProactiveAlerts(authToken)
+      .then((r) => setProactiveAlerts(r.alerts || []))
+      .catch(() => {});
+  }, [authToken, roleForAlerts]);
+
   const kpis = buildKpis(role, data);
   const actions = QUICK_ACTIONS[role] || QUICK_ACTIONS["Read Only"];
-  // Real alerts from the API — only shown to Admin, empty array if no issues or data not loaded
-  const alerts = role === "Admin" ? (data?.alerts || []) : [];
+  // Real alerts from the API — shown to Admin and Budget Analyst
+  const alerts = (role === "Admin" || role === "Budget Analyst") ? (data?.alerts || []) : [];
+  const unansweredQuestions = (role === "Admin" || role === "Budget Analyst") ? (data?.unansweredQuestions || []) : [];
 
   return (
     <article className="panel active">
@@ -165,6 +199,27 @@ export default function DashboardPanel({ authToken, user, onNavigate }) {
             <div key={i} className={`db-alert db-alert-${a.level}`}>
               <span className="db-alert-icon">{a.level === "warn" ? "⚠️" : "ℹ️"}</span>
               {a.msg}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Proactive Alerts ──────────────────────────────────── */}
+      {proactiveAlerts.length > 0 && (
+        <div className="db-alerts" style={{ marginTop: alerts.length ? 0 : undefined }}>
+          {proactiveAlerts.map((a) => (
+            <div key={a.id} className={`db-alert db-alert-${a.level}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <span className="db-alert-icon">
+                  {a.level === "critical" ? "🚨" : a.level === "warn" ? "⚠️" : "ℹ️"}
+                </span>
+                <strong>{a.title}: </strong>{a.message}
+              </div>
+              {a.action && (
+                <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 12, whiteSpace: "nowrap", flexShrink: 0 }}>
+                  {a.action}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -261,6 +316,27 @@ export default function DashboardPanel({ authToken, user, onNavigate }) {
                     <div className="db-topic-bar" style={{ width: `${t.pct}%` }} />
                   </div>
                   <span className="db-topic-pct">{t.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Unanswered Questions / Knowledge Gaps (Admin + Budget Analyst) */}
+        {unansweredQuestions.length > 0 && (
+          <div className="db-card db-card-gaps">
+            <h3 className="db-card-title">Unanswered Questions</h3>
+            <p className="db-card-subtitle">Recent questions the AI could not answer — add documents to fill these gaps</p>
+            <div className="db-gaps-list">
+              {unansweredQuestions.map((q, i) => (
+                <div key={i} className="db-gap-item">
+                  <span className="db-gap-icon">⚠️</span>
+                  <div className="db-gap-body">
+                    <p className="db-gap-question">{q.question}</p>
+                    <span className="db-gap-time">
+                      {new Date(q.askedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>

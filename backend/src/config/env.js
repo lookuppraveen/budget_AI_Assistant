@@ -36,5 +36,5 @@ export const env = {
   frontendUrl: process.env.FRONTEND_URL || "https://budgetaiassistance.myaisquad.com/",
   // Email responder — two-way email interface for the Budget Agent
   emailResponderEnabled: String(process.env.EMAIL_RESPONDER_ENABLED || "true").toLowerCase() === "true",
-  emailResponderIntervalMs: Number(process.env.EMAIL_RESPONDER_INTERVAL_MS || 5 * 60 * 1000)
+  emailResponderIntervalMs: Number(process.env.EMAIL_RESPONDER_INTERVAL_MS || 30 * 60 * 1000)
 };

@@ -2,6 +2,29 @@ import { pool } from "../../config/db.js";
 import { extractText } from "../../utils/extract-text.js";
 import { indexApprovedDocumentChunks } from "../retrieval/retrieval.service.js";
 
+// Canonical knowledge domain taxonomy (must match uiContent.js knowledgeDomains)
+export const VALID_DOMAINS = new Set([
+  "Budget Policies",
+  "Budget Procedures",
+  "Historical Budgets",
+  "Budget Training Materials",
+  "Board Presentations",
+  "Department Requests",
+  "Budget Manager Correspondence",
+  "Calendar & Deadlines",
+  "Revenue Assumptions"
+]);
+
+function validateDomain(domain) {
+  if (!domain || !VALID_DOMAINS.has(domain.trim())) {
+    const err = new Error(
+      `Invalid domain "${domain}". Must be one of: ${[...VALID_DOMAINS].join(", ")}`
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+}
+
 export async function listDocuments({ departmentCode, status, departmentId } = {}) {
   const filters = [];
   const values = [];
@@ -42,6 +65,8 @@ export async function listDocuments({ departmentCode, status, departmentId } = {
 }
 
 export async function createDocument({ title, sourceType, domain, departmentCode, metadata, rawText }, currentUserId) {
+  validateDomain(domain);
+
   const department = await pool.query("SELECT id FROM departments WHERE upper(code) = upper($1)", [departmentCode]);
 
   if (department.rowCount === 0) {
@@ -65,6 +90,8 @@ export async function createDocument({ title, sourceType, domain, departmentCode
 }
 
 export async function uploadDocuments({ files, domain, departmentCode }, currentUserId) {
+  validateDomain(domain);
+
   const department = await pool.query("SELECT id FROM departments WHERE upper(code) = upper($1)", [departmentCode]);
 
   if (department.rowCount === 0) {

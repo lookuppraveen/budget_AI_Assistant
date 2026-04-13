@@ -12,7 +12,7 @@ const documentIdParamSchema = z.object({
   params: z.object({ id: z.string().uuid("Invalid document id") }),
   query: z.object({})
 });
-import { createDocument, deleteDocument, getDocumentDownloadUrl, ingestUrl, listDocuments, reuploadDocument, updateDocumentStatus, uploadDocuments } from "./documents.service.js";
+import { createDocument, deleteDocument, getDocumentContent, getDocumentDownloadUrl, ingestUrl, listDocuments, reuploadDocument, updateDocumentStatus, uploadDocuments } from "./documents.service.js";
 import { logAudit } from "../../utils/audit.js";
 
 const documentsRouter = Router();
@@ -104,6 +104,17 @@ documentsRouter.get(
   asyncHandler(async (req, res) => {
     const result = await getDocumentDownloadUrl(req.validated.params.id);
     res.status(200).json(result);
+  })
+);
+
+documentsRouter.get(
+  "/:id/content",
+  authenticate,
+  authorize("Admin", "Budget Analyst"),
+  validate(documentIdParamSchema),
+  asyncHandler(async (req, res) => {
+    const doc = await getDocumentContent(req.validated.params.id);
+    res.status(200).json({ document: doc });
   })
 );
 

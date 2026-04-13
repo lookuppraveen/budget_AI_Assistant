@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { pool } from "../../config/db.js";
 import { env } from "../../config/env.js";
-import { indexAllApprovedDocuments, searchKnowledgeChunks } from "../retrieval/retrieval.service.js";
+import { searchKnowledgeChunks } from "../retrieval/retrieval.service.js";
 
 let openAiClient = null;
 
@@ -129,6 +129,133 @@ async function searchApprovedKnowledge(message, departmentId = null) {
   };
 }
 
+// ── Budget request relevance detection ───────────────────────────────────────
+const BUDGET_REQUEST_PATTERNS = [
+  /\bbudget request(s)?\b/i,
+  /\bFTE\b/,
+  /\bfull.?time equivalent\b/i,
+  /\brequested amount\b/i,
+  /\bjustification\b/i,
+  /\bbase budget\b/i,
+  /\bone.?time\b/i,
+  /\brecurring\b/i,
+  /\bfund type\b/i,
+  /\bexpense categor/i,
+  /\bpriority\b/i,
+  /\bapproved request\b/i,
+  /\bpending request\b/i,
+  /\bsubmitted request\b/i,
+  /\bhow much (did|does|is|was)\b/i,
+  /\bwhat (was|is) (the |a )?(request|budget|amount)\b/i,
+  /\btell me about\b/i,
+  /\bshow me\b/i,
+];
+
+function isBudgetRequestQuestion(message) {
+  return BUDGET_REQUEST_PATTERNS.some((p) => p.test(message));
+}
+
+/**
+ * Fetch up to 20 budget requests relevant to the user's question.
+ * Uses full-text + keyword search across title, justification, department, fiscal year.
+ */
+async function fetchRelevantBudgetRequests(message, departmentId = null) {
+  try {
+    // Extract fiscal year mention (e.g. FY26, FY2026)
+    const fyMatch = message.match(/\bFY\s*(\d{2,4})\b/i);
+    const fiscalYear = fyMatch ? `FY${fyMatch[1].slice(-2).padStart(2, "0")}` : null;
+
+    // Build a tsquery-safe search string from the message
+    const words = message
+      .replace(/[^a-zA-Z0-9\s]/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+      .slice(0, 10)
+      .map((w) => w + ":*")
+      .join(" | ");
+
+    const params = [];
+    const conditions = [];
+
+    if (words) {
+      params.push(words);
+      conditions.push(`(
+        to_tsvector('english', coalesce(br.title,'') || ' ' || coalesce(br.justification,'') || ' ' || coalesce(d.name,''))
+        @@ to_tsquery('english', $${params.length})
+      )`);
+    }
+
+    if (fiscalYear) {
+      params.push(`FY${fyMatch[1]}`);
+      conditions.push(`br.fiscal_year ILIKE $${params.length}`);
+    }
+
+    if (departmentId) {
+      params.push(departmentId);
+      conditions.push(`br.department_id = $${params.length}`);
+    }
+
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join(" OR ")}`
+      : "";
+
+    const result = await pool.query(
+      `SELECT
+         br.id, br.title, br.fiscal_year, br.fund_type, br.expense_category,
+         br.request_type, br.cost_type,
+         br.base_budget_amount, br.requested_amount,
+         br.recurring_amount, br.one_time_amount,
+         br.justification, br.strategic_alignment, br.impact_description,
+         br.status, br.priority, br.ai_summary,
+         br.risk_flag, br.risk_reason,
+         d.name AS department_name
+       FROM budget_requests br
+       JOIN departments d ON d.id = br.department_id
+       ${whereClause}
+       ORDER BY br.updated_at DESC
+       LIMIT 20`,
+      params
+    );
+
+    return result.rows;
+  } catch (err) {
+    console.error("fetchRelevantBudgetRequests failed:", err.message);
+    return [];
+  }
+}
+
+/**
+ * Formats budget request rows into a readable context block for the LLM.
+ */
+function formatBudgetRequestsContext(rows) {
+  if (!rows.length) return "";
+  const lines = rows.map((r) => {
+    const fmt = (n) => Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+    const parts = [
+      `Title: ${r.title}`,
+      `Department: ${r.department_name}`,
+      `Fiscal Year: ${r.fiscal_year}`,
+      `Status: ${r.status}`,
+      `Priority: ${r.priority || "—"}`,
+      `Fund Type: ${r.fund_type || "—"}`,
+      `Expense Category: ${r.expense_category || "—"}`,
+      `Request Type: ${r.request_type || "—"}`,
+      `Base Budget: ${fmt(r.base_budget_amount)}`,
+      `Requested Amount: ${fmt(r.requested_amount)}`,
+      `Recurring Amount: ${fmt(r.recurring_amount)}`,
+      `One-Time Amount: ${fmt(r.one_time_amount)}`,
+    ];
+    if (r.justification) parts.push(`Justification: ${r.justification.slice(0, 400)}`);
+    if (r.strategic_alignment) parts.push(`Strategic Alignment: ${r.strategic_alignment.slice(0, 200)}`);
+    if (r.impact_description) parts.push(`Impact: ${r.impact_description.slice(0, 200)}`);
+    if (r.ai_summary) parts.push(`AI Summary: ${r.ai_summary.slice(0, 200)}`);
+    if (r.risk_flag) parts.push(`Risk: ${r.risk_reason || "flagged"}`);
+    return parts.join("\n");
+  });
+  return `LIVE BUDGET REQUESTS DATA (${rows.length} record${rows.length !== 1 ? "s" : ""}):\n\n` + lines.join("\n\n---\n\n");
+}
+
 function buildFallbackResponse(message, citations) {
   const normalized = message.toLowerCase();
 
@@ -243,7 +370,7 @@ function buildContextNote(ctx = {}) {
 }
 
 // Shared: build the system prompt and message array for OpenAI
-function buildOpenAiMessages(message, chunks, history, source, budgetContext = {}, agentType = "general") {
+function buildOpenAiMessages(message, chunks, history, source, budgetContext = {}, agentType = "general", budgetRequestsContext = "") {
   const grouped = new Map();
   for (const chunk of chunks) {
     if (!grouped.has(chunk.title)) grouped.set(chunk.title, []);
@@ -283,7 +410,7 @@ DRAFTING RULES:
 - After the draft, add a brief "Notes:" section (2–3 bullet points) explaining key choices and suggesting the user verify any figures against live data.${contextNote ? `\n\nACTIVE BUDGET CONTEXT:\n${contextNote}` : ""}
 
 APPROVED KNOWLEDGE SOURCES:
-${knowledgeContext}`;
+${knowledgeContext}${budgetRequestsContext ? `\n\n${budgetRequestsContext}` : ""}`;
 
     const messages = [{ role: "system", content: draftSystemPrompt }];
     for (const turn of history.slice(-6)) {
@@ -332,16 +459,17 @@ PERSONALITY:
 - When multiple sources are relevant, synthesize them together into a cohesive narrative rather than listing them separately.
 
 RULES:
-- Answer based on the approved knowledge sources provided below.
-- If the sources don't contain relevant information, say so warmly and suggest the user reach out to their budget office.
+- Answer based on the approved knowledge sources and live budget requests data provided below.
+- If neither source contains relevant information, say so warmly and suggest the user reach out to their budget office.
 - Provide guidance and policy interpretation only — never execute transactions, approvals, or system actions.
 - Cite sources by weaving document titles naturally into your response (e.g. "According to the FY26 Guidelines..." or "The Capital Projects Policy notes that..."). When drawing from multiple sources, reference each one where it contributes.
+- When answering from live budget requests data, reference specific fields (title, department, amount, status) accurately and precisely.
 - If you find information about a specific person, project, or line item mentioned across multiple sources, consolidate what each source says into a unified summary.
 - Structure longer answers with clear paragraphs. Use brief headers only when the answer covers multiple distinct topics.
 - Don't make up anything that isn't in the sources.${voiceGuidance}${suggestionsGuidance}
 
 APPROVED KNOWLEDGE SOURCES:
-${knowledgeContext}`;
+${knowledgeContext}${budgetRequestsContext ? `\n\n${budgetRequestsContext}` : ""}`;
 
   const messages = [{ role: "system", content: systemPrompt }];
   for (const turn of history.slice(-10)) {
@@ -352,10 +480,10 @@ ${knowledgeContext}`;
 }
 
 // Non-streaming (kept for backward compatibility)
-async function generateLlmResponse(message, chunks, citations, history, source = "text", budgetContext = {}, agentType = "general") {
+async function generateLlmResponse(message, chunks, citations, history, source = "text", budgetContext = {}, agentType = "general", budgetRequestsContext = "") {
   if (!env.openAiApiKey) return { text: buildFallbackResponse(message, citations), suggestions: [] };
   try {
-    const messages = buildOpenAiMessages(message, chunks, history, source, budgetContext, agentType);
+    const messages = buildOpenAiMessages(message, chunks, history, source, budgetContext, agentType, budgetRequestsContext);
     const completion = await getOpenAiClient().chat.completions.create({
       model: env.openAiChatModel,
       messages,
@@ -373,14 +501,14 @@ async function generateLlmResponse(message, chunks, citations, history, source =
 
 // Streaming — calls onToken(chunk) for each visible token, returns { text, suggestions }
 // Buffers the JSON suggestions tail so it never appears in the streamed UI output.
-async function streamLlmResponse(message, chunks, citations, history, source, onToken, budgetContext = {}, agentType = "general") {
+async function streamLlmResponse(message, chunks, citations, history, source, onToken, budgetContext = {}, agentType = "general", budgetRequestsContext = "") {
   if (!env.openAiApiKey) {
     const fallback = buildFallbackResponse(message, citations);
     onToken(fallback);
     return { text: fallback, suggestions: [] };
   }
   try {
-    const messages = buildOpenAiMessages(message, chunks, history, source, budgetContext, agentType);
+    const messages = buildOpenAiMessages(message, chunks, history, source, budgetContext, agentType, budgetRequestsContext);
     const stream = await getOpenAiClient().chat.completions.create({
       model: env.openAiChatModel,
       messages,
@@ -513,14 +641,18 @@ export async function createChatTurn(userId, { conversationId, message, source }
       [resolvedConversationId, source, message.trim()]
     );
 
-    let { citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId);
-    if (!citations.length) {
-      await indexAllApprovedDocuments();
-      ({ citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId));
-    }
+    const { citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId);
 
     const agentType = classifyQuery(message.trim());
-    const { text: assistantText, suggestions } = await generateLlmResponse(message.trim(), chunks, citations, history, source, budgetContext, agentType);
+
+    // Fetch live budget requests data when the question is about budget requests
+    let budgetRequestsContext = "";
+    if (isBudgetRequestQuestion(message.trim())) {
+      const budgetRows = await fetchRelevantBudgetRequests(message.trim(), departmentId);
+      budgetRequestsContext = formatBudgetRequestsContext(budgetRows);
+    }
+
+    const { text: assistantText, suggestions } = await generateLlmResponse(message.trim(), chunks, citations, history, source, budgetContext, agentType, budgetRequestsContext);
 
     const assistantMessageResult = await client.query(
       `INSERT INTO chat_messages (conversation_id, role, source, content, metadata, agent_type)
@@ -641,18 +773,22 @@ export async function streamChatTurn(userId, { conversationId, message, source }
     }
   }
 
-  // ── Phase 2: knowledge search (no DB connection held) ────────────────────
-  let { citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId);
-  if (!citations.length) {
-    await indexAllApprovedDocuments();
-    ({ citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId));
-  }
+  // ── Phase 2: knowledge search + budget requests (no DB connection held) ──
+  const { citations, chunks } = await searchApprovedKnowledge(message.trim(), departmentId);
 
   const agentType = classifyQuery(message.trim());
+
+  // Fetch live budget requests data when the question is about budget requests
+  let budgetRequestsContext = "";
+  if (isBudgetRequestQuestion(message.trim())) {
+    const budgetRows = await fetchRelevantBudgetRequests(message.trim(), departmentId);
+    budgetRequestsContext = formatBudgetRequestsContext(budgetRows);
+  }
+
   onCitations(citations);
 
   // ── Phase 3: stream OpenAI tokens ────────────────────────────────────────
-  const { text: assistantText, suggestions } = await streamLlmResponse(message.trim(), chunks, citations, history, source, onToken, budgetContext, agentType);
+  const { text: assistantText, suggestions } = await streamLlmResponse(message.trim(), chunks, citations, history, source, onToken, budgetContext, agentType, budgetRequestsContext);
 
   // ── Phase 4: save assistant message to DB ────────────────────────────────
   {

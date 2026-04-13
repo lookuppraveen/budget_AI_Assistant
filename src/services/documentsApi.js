@@ -97,6 +97,10 @@ export async function downloadDocument(token, documentId) {
   return requestApi(`/documents/${documentId}/download`, { token });
 }
 
+export async function getDocumentContent(token, documentId) {
+  return requestApi(`/documents/${documentId}/content`, { token });
+}
+
 export async function searchKnowledge(token, query, { domain, department, limit } = {}) {
   const params = new URLSearchParams({ q: query });
   if (domain) params.set("domain", domain);

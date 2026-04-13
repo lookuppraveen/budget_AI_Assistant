@@ -373,6 +373,39 @@ export async function getDocumentDownloadUrl(documentId) {
   );
 }
 
+export async function getDocumentContent(documentId) {
+  const result = await pool.query(
+    `SELECT kd.id, kd.title, kd.source_type, kd.domain, kd.status, kd.raw_text, kd.metadata,
+            kd.created_at, kd.updated_at,
+            d.name AS department_name,
+            u.name AS submitted_by_name
+     FROM knowledge_documents kd
+     LEFT JOIN departments d ON d.id = kd.department_id
+     LEFT JOIN users u ON u.id = kd.submitted_by
+     WHERE kd.id = $1`,
+    [documentId]
+  );
+
+  if (result.rowCount === 0) {
+    throw Object.assign(new Error("Document not found"), { statusCode: 404 });
+  }
+
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    title: row.title,
+    sourceType: row.source_type,
+    domain: row.domain,
+    status: row.status,
+    department: row.department_name,
+    submittedBy: row.submitted_by_name,
+    rawText: row.raw_text || "",
+    metadata: row.metadata || {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 export async function reuploadDocument(documentId, file) {
   const rawText = await extractText(file.buffer, file.mimetype);
 

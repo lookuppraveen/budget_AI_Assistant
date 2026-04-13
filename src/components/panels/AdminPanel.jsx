@@ -38,7 +38,7 @@ import {
   updateRolePermissions,
   updateDocumentStatus
 } from "../../services/adminApi.js";
-import { downloadDocument } from "../../services/documentsApi.js";
+import { downloadDocument, getDocumentContent } from "../../services/documentsApi.js";
 
 const masterSeed = {
   "Fund Type": ["General Fund", "Restricted Fund", "Capital Fund"],
@@ -286,6 +286,8 @@ export default function AdminPanel({ authToken }) {
   const [documentChunks, setDocumentChunks] = useState([]);
   const [isLoadingChunks, setIsLoadingChunks] = useState(false);
   const [isDocumentReindexing, setIsDocumentReindexing] = useState(false);
+  const [viewingDoc, setViewingDoc] = useState(null);       // { id, title, rawText, metadata, ... }
+  const [isLoadingDocContent, setIsLoadingDocContent] = useState(false);
 
   const currentMasterItems = useMemo(() => masterDataRecords[masterType] || [], [masterDataRecords, masterType]);
 
@@ -1013,12 +1015,36 @@ export default function AdminPanel({ authToken }) {
     }
   };
 
-  const handleDocumentDownload = async (documentId) => {
+  const handleDocumentDownload = async (documentId, documentTitle) => {
     try {
-      const result = await downloadDocument(authToken, documentId);
-      window.open(result.url, "_blank", "noopener,noreferrer");
+      setIsLoadingDocContent(true);
+      const { document: doc } = await getDocumentContent(authToken, documentId);
+      const blob = new Blob([doc.rawText || "(No extracted text available)"], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(documentTitle || doc.title || documentId).replace(/[^a-z0-9_\-. ]/gi, "_")}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (err) {
       setAdminMessage(`Download failed: ${err.message}`);
+    } finally {
+      setIsLoadingDocContent(false);
+    }
+  };
+
+  const handleViewDocument = async (documentId) => {
+    setIsLoadingDocContent(true);
+    setViewingDoc(null);
+    try {
+      const { document: doc } = await getDocumentContent(authToken, documentId);
+      setViewingDoc(doc);
+    } catch (err) {
+      setAdminMessage(`Could not load document: ${err.message}`);
+    } finally {
+      setIsLoadingDocContent(false);
     }
   };
 
@@ -2009,15 +2035,24 @@ export default function AdminPanel({ authToken }) {
                   >
                     {isDocumentReindexing && selectedDocForChunks === document.id ? "Reindexing..." : "Reindex Doc"}
                   </button>
-                  {document.source === "Upload" && (
-                    <button
-                      type="button"
-                      className="mini-btn"
-                      onClick={() => handleDocumentDownload(document.id)}
-                    >
-                      Download
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => handleViewDocument(document.id)}
+                    disabled={isLoadingDocContent}
+                    title="View extracted document text"
+                  >
+                    {isLoadingDocContent && viewingDoc === null ? "Loading…" : "View"}
+                  </button>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => handleDocumentDownload(document.id, document.title)}
+                    disabled={isLoadingDocContent}
+                    title="Download extracted text as .txt file"
+                  >
+                    Download
+                  </button>
                 </div>
               </div>
             ))}
@@ -2038,6 +2073,61 @@ export default function AdminPanel({ authToken }) {
                     </p>
                   ))}
                 </div>
+              )}
+            </section>
+          )}
+
+          {isLoadingDocContent && !viewingDoc && (
+            <section className="setup-card nested-card">
+              <p className="section-caption">Loading document content…</p>
+            </section>
+          )}
+
+          {viewingDoc && (
+            <section className="setup-card nested-card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <h3 style={{ margin: "0 0 4px" }}>{viewingDoc.title}</h3>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#6b7280" }}>
+                    {viewingDoc.department && <span>Dept: <strong>{viewingDoc.department}</strong></span>}
+                    {viewingDoc.domain && <span>Domain: <strong>{viewingDoc.domain}</strong></span>}
+                    <span>Source: <strong>{viewingDoc.sourceType}</strong></span>
+                    <span className={`status-chip ${viewingDoc.status.toLowerCase()}`}>{viewingDoc.status}</span>
+                    {viewingDoc.submittedBy && <span>Submitted by: <strong>{viewingDoc.submittedBy}</strong></span>}
+                    {viewingDoc.metadata?.originalName && <span>File: <strong>{viewingDoc.metadata.originalName}</strong></span>}
+                    {viewingDoc.metadata?.extractedChars != null && (
+                      <span>{Number(viewingDoc.metadata.extractedChars).toLocaleString()} chars extracted</span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => handleDocumentDownload(viewingDoc.id, viewingDoc.title)}
+                    title="Download as .txt file"
+                  >
+                    Download .txt
+                  </button>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => setViewingDoc(null)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              {viewingDoc.rawText ? (
+                <pre style={{
+                  background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8,
+                  padding: "14px 16px", fontSize: 12, lineHeight: 1.65, whiteSpace: "pre-wrap",
+                  wordBreak: "break-word", maxHeight: 520, overflowY: "auto", margin: 0, fontFamily: "monospace"
+                }}>
+                  {viewingDoc.rawText}
+                </pre>
+              ) : (
+                <p className="section-caption">No extracted text available for this document.</p>
               )}
             </section>
           )}

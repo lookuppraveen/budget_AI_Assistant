@@ -160,19 +160,44 @@ export default function ChatPanel({
   const [ctxFiscalYear, setCtxFiscalYear] = useState("");
   const [ctxSaving, setCtxSaving] = useState(false);
   const [ctxSaved, setCtxSaved] = useState(false);
+  const [ctxPending, setCtxPending] = useState(false);
 
   const hasContext = ctxDept || ctxFundType || ctxFiscalYear;
 
-  // Reset context fields when conversation changes
+  // Reset context fields when conversation changes (New Chat clears to null,
+  // but keep fields so pending context survives until a new conversation ID arrives)
   useEffect(() => {
-    setCtxDept("");
-    setCtxFundType("");
-    setCtxFiscalYear("");
-    setCtxSaved(false);
+    if (currentConversationId === null) {
+      // New chat started — reset saved/pending flags but keep field values
+      setCtxSaved(false);
+      setCtxPending(false);
+    }
+  }, [currentConversationId]);
+
+  // Auto-apply pending context when a new conversation is created
+  useEffect(() => {
+    if (!currentConversationId || !ctxPending) return;
+    const payload = {};
+    if (ctxDept) payload.department = ctxDept;
+    if (ctxFundType) payload.fundType = ctxFundType;
+    if (ctxFiscalYear) payload.fiscalYear = ctxFiscalYear;
+    if (Object.keys(payload).length === 0) return;
+    updateConversationContext(authToken, currentConversationId, payload)
+      .then(() => { setCtxPending(false); setCtxSaved(true); setTimeout(() => setCtxSaved(false), 2000); })
+      .catch(() => {});
   }, [currentConversationId]);
 
   const handleSaveContext = async () => {
-    if (!currentConversationId || ctxSaving) return;
+    if (ctxSaving) return;
+
+    if (!currentConversationId) {
+      // No conversation yet — mark context as pending; it will be applied on first message
+      setCtxPending(true);
+      setCtxSaved(true);
+      setTimeout(() => setCtxSaved(false), 2000);
+      return;
+    }
+
     setCtxSaving(true);
     try {
       const payload = {};
@@ -180,6 +205,7 @@ export default function ChatPanel({
       if (ctxFundType) payload.fundType = ctxFundType;
       if (ctxFiscalYear) payload.fiscalYear = ctxFiscalYear;
       await updateConversationContext(authToken, currentConversationId, payload);
+      setCtxPending(false);
       setCtxSaved(true);
       setTimeout(() => setCtxSaved(false), 2000);
     } catch (_e) {
@@ -194,6 +220,7 @@ export default function ChatPanel({
     setCtxFundType("");
     setCtxFiscalYear("");
     setCtxSaved(false);
+    setCtxPending(false);
     if (currentConversationId) {
       updateConversationContext(authToken, currentConversationId, {}).catch(() => {});
     }
@@ -337,17 +364,17 @@ export default function ChatPanel({
                 type="button"
                 className="cp-ctx-save-btn"
                 onClick={handleSaveContext}
-                disabled={!currentConversationId || ctxSaving || !hasContext}
+                disabled={ctxSaving || !hasContext}
               >
-                {ctxSaving ? "Saving…" : ctxSaved ? "Saved!" : "Apply Context"}
+                {ctxSaving ? "Saving…" : ctxSaved ? (ctxPending ? "Ready — will apply on send" : "Saved!") : "Apply Context"}
               </button>
               {hasContext && (
                 <button type="button" className="cp-ctx-clear-btn" onClick={handleClearContext}>
                   Clear
                 </button>
               )}
-              {!currentConversationId && (
-                <span className="cp-ctx-hint">Start a conversation first to apply context.</span>
+              {ctxPending && !currentConversationId && (
+                <span className="cp-ctx-hint">Context will be applied when you send your first message.</span>
               )}
             </div>
           </div>
